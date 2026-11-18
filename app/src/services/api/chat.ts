@@ -9,6 +9,7 @@
  */
 
 import { ApiError, type ChatRequest, type ModelInfo, type StreamEvent } from './types.js'
+import { PROVIDER_HEADER, providerById } from './providers.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -128,12 +129,21 @@ async function* readSseData(stream: ReadableStream<Uint8Array>): AsyncGenerator<
 
 /**
  * GET `${base}/models`：取上游模型列表。
+ * `provider` 指定走哪家订阅（中继/APK 按头路由）；缺省按 opencode。
  * 返回 `{ id, ownedBy }`；非 2xx、响应不是 JSON、缺列表时抛 ApiError。
  */
-export const fetchModels = async (apiBase: string, signal?: AbortSignal): Promise<ModelInfo[]> => {
+export const fetchModels = async (
+  apiBase: string,
+  provider?: string,
+  signal?: AbortSignal
+): Promise<ModelInfo[]> => {
+  const headers: Record<string, string> = {}
+  if (provider) {
+    headers[PROVIDER_HEADER] = provider
+  }
   const response = await fetchOrThrow(
     `${normalizeApiBase(apiBase)}/models`,
-    { method: 'GET', signal },
+    { method: 'GET', headers, signal },
     signal
   )
   if (!response.ok) {
@@ -196,21 +206,35 @@ export async function* streamChat(
     throw new ApiError('interrupted', '已停止')
   }
 
+  // 按各家订阅的实测结论决定要不要带未经确认的字段：
+  // 智谱 Coding 端点未验证 stream_options / reasoning_effort，先不发；其余四家全发。
+  const preset = request.provider ? providerById(request.provider) : null
+  const sendUsageOption = preset ? preset.sendUsageOption : true
+  const sendEffort = preset ? preset.supportsEffort : true
+
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
     stream: true,
-    stream_options: { include_usage: true },
-    ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
+    ...(sendUsageOption ? { stream_options: { include_usage: true } } : {}),
+    ...(sendEffort && request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
+  }
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'text/event-stream',
+  }
+  if (request.provider) {
+    headers[PROVIDER_HEADER] = request.provider
   }
 
   const response = await fetchOrThrow(
     `${normalizeApiBase(apiBase)}/chat/completions`,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      headers,
       body: JSON.stringify(body),
       signal,
     },

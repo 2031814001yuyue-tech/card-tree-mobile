@@ -1,17 +1,22 @@
 import clsx from 'clsx'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelInfo } from '../../services/api/types.js'
+import { PROVIDERS, providerById } from '../../services/api/providers.js'
 import {
   checkNativeWebUpdate,
   clearNativeKey,
+  clearNativeProviderKey,
   clearNativeSearchKey,
   installNativeWebUpdate,
   isNativeApp,
   nativeHasKey,
+  nativeHasProviderKey,
   nativeHasSearchKey,
+  nativeSupportsProviders,
   nativeVersion,
   nativeWebVersion,
   saveNativeKey,
+  saveNativeProviderKey,
   saveNativeSearchKey,
 } from '../../services/native.js'
 import {
@@ -20,12 +25,14 @@ import {
   updateState,
 } from '../../services/update.js'
 import {
-  REASONING_EFFORTS,
   setApiBase,
   setModel,
+  setProvider,
   setReasoningEffort,
+  setStyleTheme,
   setThemePreference,
   useSettings,
+  type StyleTheme,
   type ThemePreference,
 } from '../../services/settings.js'
 import { showToast } from '../base/toastState.js'
@@ -42,12 +49,21 @@ const EFFORT_LABEL: Record<string, string> = {
   low: '低',
   medium: '中',
   high: '高',
+  max: '最大',
 }
 
 const THEMES: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
+]
+
+/** 界面风格：只换一层颜色 token，每种都有浅色 / 深色两套 */
+const STYLE_THEMES: { value: StyleTheme; label: string }[] = [
+  { value: 'index', label: '索引卡' },
+  { value: 'plain', label: '素笺' },
+  { value: 'parchment', label: '羊皮纸' },
+  { value: 'graphite', label: '石墨' },
 ]
 
 const Pill = ({
@@ -85,6 +101,8 @@ export type SettingsSheetProps = {
   onBackupNow: () => void
   /** 联网搜索 Key 变了：让 App 重新问一次服务端有没有配 */
   onRefreshSearch: () => void
+  /** 电脑中继 / APK 上各家订阅有没有配 Key（来自 /api/health），拿不到时为 null */
+  relayProviders: Record<string, boolean> | null
 }
 
 const formatBackupTime = (value: string | null) => {
@@ -151,7 +169,7 @@ const WebUpdate = () => {
       <div className={styles.backupInfo}>
         <span className={styles.label}>网页层版本</span>
         <span className={styles.count}>
-          {webVersion ?? nativeVersion() ?? '0.3.4'}
+          {webVersion ?? nativeVersion() ?? '0.3.5'}
           {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
         </span>
       </div>
@@ -201,12 +219,19 @@ export const SettingsSheet = ({
   lastBackupAt,
   onBackupNow,
   onRefreshSearch,
+  relayProviders,
 }: SettingsSheetProps) => {
   const settings = useSettings()
   const [apiBase, setApiBaseInput] = useState(settings.apiBase)
   const fileRef = useRef<HTMLInputElement>(null)
   const native = isNativeApp()
-  const [hasNativeKey, setHasNativeKey] = useState(() => nativeHasKey())
+  // 0.3.5 起壳里才有按订阅分存的 Key 方法；旧壳上隐藏多订阅 UI，避免出现存不上的输入框
+  const providersReady = nativeSupportsProviders()
+  const provider = settings.provider
+  const preset = providerById(provider)
+  const [hasNativeKey, setHasNativeKey] = useState(() =>
+    providersReady ? nativeHasProviderKey(provider) : nativeHasKey(),
+  )
   const [keyDraft, setKeyDraft] = useState('')
   const [hasSearchKey, setHasSearchKey] = useState(() => nativeHasSearchKey())
   const [searchDraft, setSearchDraft] = useState('')
@@ -214,19 +239,30 @@ export const SettingsSheet = ({
   useEffect(() => {
     if (open) {
       setApiBaseInput(useSettings.getState().apiBase)
-      setHasNativeKey(nativeHasKey())
+      setHasNativeKey(providersReady ? nativeHasProviderKey(provider) : nativeHasKey())
       setKeyDraft('')
       setHasSearchKey(nativeHasSearchKey())
       setSearchDraft('')
     }
-  }, [open])
+  }, [open, provider, providersReady])
 
-  const version = nativeVersion() ?? '0.3.4'
+  const version = nativeVersion() ?? '0.3.5'
 
   // 模型列表还没回来时，也把当前模型显示出来
   const options = models.some((item) => item.id === settings.model)
     ? models.map((item) => item.id)
     : [settings.model, ...models.map((item) => item.id)]
+
+  const saveKeyForProvider = (value: string): boolean =>
+    providersReady ? saveNativeProviderKey(provider, value) : saveNativeKey(value)
+
+  const clearKeyForProvider = () => {
+    if (providersReady) {
+      clearNativeProviderKey(provider)
+    } else {
+      clearNativeKey()
+    }
+  }
 
   return (
     <Sheet open={open} title="设置" onClose={onClose} size="full">
@@ -234,7 +270,7 @@ export const SettingsSheet = ({
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>连接</h3>
           <div className={styles.row}>
-            <span className={styles.label}>API Key</span>
+            <span className={styles.label}>{preset.label} 的 Key</span>
             <span className={styles.count}>{hasNativeKey ? '已配置，加密保存在本机' : '还没有配置'}</span>
           </div>
           <div className={styles.field}>
@@ -242,7 +278,11 @@ export const SettingsSheet = ({
               className={styles.input}
               type="password"
               value={keyDraft}
-              placeholder={hasNativeKey ? '粘贴新的 Key 可以替换' : '粘贴 opencode go 的 API Key'}
+              placeholder={
+                hasNativeKey
+                  ? '粘贴新的 Key 可以替换'
+                  : `粘贴 ${preset.label} 的 API Key`
+              }
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => setKeyDraft(event.target.value)}
@@ -258,13 +298,13 @@ export const SettingsSheet = ({
                 if (!value) {
                   return
                 }
-                if (!saveNativeKey(value)) {
+                if (!saveKeyForProvider(value)) {
                   showToast('保存失败，再试一次')
                   return
                 }
                 setKeyDraft('')
                 setHasNativeKey(true)
-                showToast('已保存到本机')
+                showToast(`已保存 ${preset.label} 的 Key`)
                 onReloadModels()
               }}
             >
@@ -275,9 +315,9 @@ export const SettingsSheet = ({
                 type="button"
                 className={styles.actionButton}
                 onClick={() => {
-                  clearNativeKey()
+                  clearKeyForProvider()
                   setHasNativeKey(false)
-                  showToast('已清除本机 Key')
+                  showToast(`已清除 ${preset.label} 的 Key`)
                   onReloadModels()
                 }}
               >
@@ -287,12 +327,39 @@ export const SettingsSheet = ({
           </div>
           <p className={styles.hint}>
             Key 用 Android Keystore 加密后存在这台手机里，不上传、不随备份导出；换手机需要重新粘贴。
+            {provider === 'deepseek'
+              ? ' DeepSeek 官方订阅与下面的联网搜索共用同一把 Key。'
+              : ''}
           </p>
         </section>
       ) : null}
 
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>模型</h3>
+        <h3 className={styles.sectionTitle}>订阅与模型</h3>
+        <div className={styles.row}>
+          <span className={styles.label}>模型订阅</span>
+          <div className={styles.pills}>
+            {PROVIDERS.map((item) => (
+              <Pill
+                key={item.id}
+                active={provider === item.id}
+                onClick={() => {
+                  setProvider(item.id)
+                  onReloadModels()
+                }}
+              >
+                {item.label}
+              </Pill>
+            ))}
+          </div>
+        </div>
+        {relayProviders ? (
+          <p className={styles.hint}>
+            服务端已配置 Key 的订阅：
+            {PROVIDERS.filter((item) => relayProviders[item.id]).map((item) => ` ${item.label}`)}
+            {PROVIDERS.every((item) => !relayProviders[item.id]) ? '（一家都没有）' : ''}
+          </p>
+        ) : null}
         <div className={styles.field}>
           <span className={styles.label}>当前模型</span>
           <Select
@@ -303,20 +370,23 @@ export const SettingsSheet = ({
             ariaLabel="当前模型"
           />
         </div>
-        <div className={styles.row}>
-          <span className={styles.label}>推理强度</span>
-          <div className={styles.pills}>
-            {REASONING_EFFORTS.map((effort) => (
-              <Pill
-                key={effort}
-                active={settings.reasoningEffort === effort}
-                onClick={() => setReasoningEffort(effort)}
-              >
-                {EFFORT_LABEL[effort] ?? effort}
-              </Pill>
-            ))}
+        {preset.supportsEffort ? (
+          <div className={styles.row}>
+            <span className={styles.label}>推理强度</span>
+            <div className={styles.pills}>
+              {preset.efforts.map((effort) => (
+                <Pill
+                  key={effort}
+                  active={settings.reasoningEffort === effort}
+                  onClick={() => setReasoningEffort(effort)}
+                >
+                  {EFFORT_LABEL[effort] ?? effort}
+                </Pill>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
+        <p className={styles.hint}>{preset.note}</p>
         {native ? null : (
           <>
             <label className={styles.field}>
@@ -433,6 +503,21 @@ export const SettingsSheet = ({
             ))}
           </div>
         </div>
+        <div className={styles.row}>
+          <span className={styles.label}>风格</span>
+          <div className={styles.pills}>
+            {STYLE_THEMES.map((style) => (
+              <Pill
+                key={style.value}
+                active={settings.styleTheme === style.value}
+                onClick={() => setStyleTheme(style.value)}
+              >
+                {style.label}
+              </Pill>
+            ))}
+          </div>
+        </div>
+        <p className={styles.hint}>风格只换纸面和墨色，主题管深浅；两者可以任意组合。</p>
       </section>
 
       <section className={styles.section}>
@@ -486,7 +571,7 @@ export const SettingsSheet = ({
         <h3 className={styles.sectionTitle}>关于</h3>
         <p className={styles.about}>
           卡片树 {version} · 把对话拆成一张张卡片，长成一棵可以回看的树。界面参考 DeepSeek App
-          的移动端风格，模型通过 opencode go 订阅调用。
+          的移动端风格，模型走 opencode go / 智谱 Coding / Kimi Coding / DeepSeek 官方订阅。
         </p>
         <p className={styles.hint}>
           {native

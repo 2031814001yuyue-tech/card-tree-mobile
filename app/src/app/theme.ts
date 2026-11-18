@@ -5,7 +5,6 @@ import { nativeBridge } from '../services/native.js'
 export type Theme = 'light' | 'dark'
 
 const query = window.matchMedia('(prefers-color-scheme: dark)')
-
 const subscribeOsTheme = (listener: () => void) => {
   query.addEventListener('change', listener)
   return () => query.removeEventListener('change', listener)
@@ -54,12 +53,21 @@ const applyTheme = (theme: Theme) => {
 }
 
 let appliedTheme: Theme | null = null
+let appliedStyle: string | null = null
 
 const syncTheme = () => {
   const theme = resolveTheme(useSettings.getState().themePreference, getOsTheme())
   if (theme !== appliedTheme) {
     appliedTheme = theme
     applyTheme(theme)
+  }
+  // 界面风格：只换 data-style，颜色由 design.css 的 token 覆盖层处理
+  const style = useSettings.getState().styleTheme
+  if (style !== appliedStyle) {
+    appliedStyle = style
+    document.body.dataset.style = style
+    // 纸面颜色变了，浏览器栏 / Android 状态栏也要跟着换
+    syncPageBackground()
   }
 }
 

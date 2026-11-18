@@ -2,7 +2,7 @@
 
 把「对话」拆成一张张卡片，长成一棵**可以回看的树**。
 
-这是桌面版 DSH 插件 [`dsh-card-tree`](../card-tree) 的手机版：单页 Web App，模型走 **opencode go 订阅**。有两种装法——**Android APK**（内置本地服务，装到手机上就不需要电脑），或者**网页 / PWA**（浏览器打开，聊天请求走电脑上的零依赖中继）。APK 从 0.3.4 起**支持网页层热更新**：界面和功能的改动发到 GitHub Releases 就能推给已安装的 App，不用重装（见下文「热更新」）。
+这是桌面版 DSH 插件 [`dsh-card-tree`](../card-tree) 的手机版：单页 Web App，模型支持**四家订阅随时切换**（opencode go / 智谱 Coding / Kimi Coding / DeepSeek 官方）。有两种装法——**Android APK**（内置本地服务，装到手机上就不需要电脑），或者**网页 / PWA**（浏览器打开，聊天请求走电脑上的零依赖中继）。APK 从 0.3.4 起**支持网页层热更新**：界面和功能的改动发到 GitHub Releases 就能推给已安装的 App，不用重装（见下文「热更新」）。
 
 界面重做了一套自己的视觉语言——**索引卡 + 生长线**：带纸纹的纸面画布、白色索引卡、一条从父卡拐进子卡的实线把树的层级画出来，卡片左上角探出 mono 字体的「签」（带穿绳孔）标明它在树里的位置。完整规范见 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
@@ -46,6 +46,10 @@
 | --- |
 | ![检查更新](docs/preview/28-update-available.png) |
 
+| 四家订阅随时切换（连接节跟随显示） | 树分支折叠 | 界面风格：羊皮纸 / 石墨 / 素笺 |
+| --- | --- | --- |
+| ![订阅与模型](docs/preview/29-providers.png) | ![收起分支](docs/preview/30-fold.png) | ![羊皮纸](docs/preview/31-style-parchment.png) ![石墨](docs/preview/32-style-graphite.png) ![素笺](docs/preview/33-style-plain.png) |
+
 ## 功能
 
 **卡片树核心（对齐桌面版主体功能）**
@@ -63,8 +67,12 @@
 - 引用卡片（最多 8 张）；**全览图可以编辑树**：拖动卡片到另一张卡片上改上级、拖到空白处摘成根卡片、从卡片右侧的「⊕」把手拉到另一张卡片上建立引用（拖动时有落点高亮、能力提示和松手 toast，详见下方「全览图能改什么」）
 - 多项目：新建 / 切换 / 重命名 / 删除；导入桌面版导出的 `state.json`；导出 / 导入本应用备份
 - **自动备份（APK）**：数据一有改动就记一笔，退到后台或每 5 分钟往「下载 / CardTree / backups」写一份，滚动保留最近 30 份；也可以随时点「立即备份」
-- 深浅色 / 跟随系统、推理强度（低/中/高）、32 个模型随时切换（模型选择器是自绘的等宽字浮层，不再是系统下拉框）
-- 401（Key 失效）不再只是报错：APK 里直接弹出重新粘贴 Key 的面板，网页版会提示去看电脑上的 `OPENCODE_GO_API_KEY`
+- **四家订阅随时切换（0.3.5 起）**：设置 → 订阅与模型，在 opencode go / 智谱 Coding / Kimi Coding / DeepSeek 官方之间一键切换；每家记忆自己的模型和推理强度，切回来还是原来那个（详见下方「多订阅」）
+- **四种界面风格（0.3.5 起）**：索引卡（默认）/ 素笺 / 羊皮纸 / 石墨，风格与深浅主题可任意组合（详见下方「界面风格」）
+- **流式自动跟随**：回答流式生成时页面自动往下滚；往回翻就停（不打扰你重读），再滚回底部自动恢复跟随
+- **树分支可折叠**：有子卡片的地方出现「收起分支」，折叠后显示「N 张子卡片」，点击展开；折叠状态记在本地
+- 深浅色 / 跟随系统、推理强度（低/中/高）、模型随时切换（模型选择器是自绘的等宽字浮层，不再是系统下拉框）
+- 401（Key 失效）不再只是报错：APK 里直接弹出重新粘贴**当前订阅** Key 的面板，网页版会提示去看电脑上中继里这家的 Key
 
 **视觉细节**
 
@@ -83,6 +91,35 @@
 
 - 没有本地工具（读文件 / 搜索 / 抓网页）——按需求「先不要工具」，先把树本身做好
 - 没有语音；联网搜索要单独配一把 DeepSeek API Key（见下方「联网搜索」）；**图片需要选支持视觉的模型**（claude-haiku-5-5 / glm-5.3 / gpt-5.6-luna 这类，deepseek-v4.1-flash 按模型元数据也支持图片），纯文本模型收到图片会报 400
+
+## 多订阅
+
+「设置 → 订阅与模型」里可以在这四家之间切换，选中的那家就是当前对话用的订阅：
+
+| 订阅 | 上游 | 默认模型 | 推理强度 | Key 环境变量（网页版中继） |
+| --- | --- | --- | --- | --- |
+| opencode go | `https://opencode.ai/zen/go/v1` | deepseek-v4.1-flash | 低 / 中 / 高 | `OPENCODE_GO_API_KEY` |
+| 智谱 Coding | `https://open.bigmodel.cn/api/coding/paas/v4` | glm-5.3 | 不支持（隐藏） | `ZAI_CODING_CN_API_KEY` |
+| Kimi Coding | `https://api.kimi.com/coding/v1` | kimi-for-coding | 低 / 高 / 最大 | `KIMI_CODING_API_KEY` |
+| DeepSeek 官方 | `https://api.deepseek.com` | deepseek-flash | 低 / 高 / 最大 | `DEEPSEEK_API_KEY` |
+
+- 四家全是 OpenAI 兼容协议，App 内部按 `x-card-tree-provider` 请求头路由（缺省按 opencode，老版本无缝兼容）
+- **每家记忆自己的模型和推理强度**：切到别家再切回来，还是你上次选的那个
+- Key 分开存：APK 里每家一个 Android Keystore 加密条目（「设置 → 连接」跟随当前订阅显示）；DeepSeek 官方的 Key 和联网搜索共用一把
+- 网页版中继把四家的 Key 都配在同一台电脑上：环境变量优先，读不到会去 `~/.dsh/.credentials.yaml` 找同名条目；设置页会显示「服务端已配置 Key 的订阅」
+- **注意**：智谱 Coding 的套餐是会过期的（本机这把 Key 实测返回 429「您的 GLM Coding Plan 套餐已到期」）；上游错误会原样透传，续订后即恢复
+- 401 / 没配 Key 时：APK 弹当前订阅的填 Key 面板；网页版提示去电脑上配这家的环境变量
+
+## 界面风格
+
+「设置 → 外观 → 风格」四种，只换纸面和墨色，深浅主题另算，可任意组合：
+
+- **索引卡**（默认）：纸面 `#f4f5f9` 带细噪点，白卡 + 生长线
+- **素笺**：纯白纸面，去掉噪点和阴影，最简
+- **羊皮纸**：暖黄纸 `#f5efe2`、墨色带一点棕、强调色换暖深靛，适合长时间阅读
+- **石墨**：冷灰纸、冷蓝强调色，对比更硬朗
+
+风格选择记在 `localStorage`，刷新即恢复。
 
 ## 图片与文件
 
@@ -123,7 +160,7 @@
 |  | **Android APK** | **网页 / PWA** |
 | --- | --- | --- | --- |
 | 需要电脑吗 | 装好之后**不需要**（只有 API Key 要在首次启动时粘一次） | 每次用都要开着电脑上的中继 `node server.mjs` |
-| 怎么装 | 把 `dist/card-tree-mobile-0.3.4.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
+| 怎么装 | 把 `dist/card-tree-mobile-0.3.5.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
 | Key 存在哪 | 手机上（Android Keystore 加密） | 电脑上（`~/.dsh/.credentials.yaml`，手机不留 Key） |
 | 数据存在哪 | App 自己的本地存储 | 浏览器 IndexedDB |
 | 适合 | 随身当独立 App 用 | 想用浏览器 / iPhone / 不想装 APK |
@@ -132,13 +169,15 @@
 
 ## Android APK（不依赖电脑）
 
-产物：[`dist/card-tree-mobile-0.3.4.apk`](dist/card-tree-mobile-0.3.4.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
+产物：[`dist/card-tree-mobile-0.3.5.apk`](dist/card-tree-mobile-0.3.5.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
+
+> 之前装过 0.3.2–0.3.4 的：0.3.5 的 Java 壳变了（多订阅的原生桥方法），**需要重新安装一次 APK**；装完之后界面 / 功能的更新又都走热更新，不用再重装。
 
 **安装**
 
 1. 把 APK 传到手机（微信文件传输助手 / USB / 网盘都行），在文件管理器里点开
 2. 系统提示「未知来源」时允许「安装未知应用」（设置 → 应用 → 特殊权限）
-3. 打开「卡片树」，首次启动会要求粘贴一次 opencode go 的 API Key
+3. 打开「卡片树」，首次启动会要求粘贴一次当前订阅的 API Key（默认 opencode go；也可以之后在「设置 → 订阅与模型」里换成智谱 / Kimi / DeepSeek 官方）
 4. Key 用 Android Keystore 加密保存在本机，之后打开就能直接提问，全程不需要电脑
 
 **它在手机上怎么跑起来的**
@@ -147,7 +186,7 @@ APK 里打包了一个只监听 `127.0.0.1` 的本地 HTTP 服务（纯 Java，�
 
 - 把打包进 `assets/www` 的网页当站点根目录发出去 → WebView 加载 `http://127.0.0.1:<port>/`，同源所以**没有 CORS 问题**
 - **端口是固定的**：第一次启动绑一个空闲端口后写进 SharedPreferences，以后每次启动都用同一个端口（WebView 的 IndexedDB 按「源」隔离，端口一变数据就全丢了——这是 0.3.0 修掉的一个真问题）
-- `/api/models`、`/api/chat/completions` 反向代理到 `https://opencode.ai/zen/go/v1`，自动注入 `Authorization` 和 opencode go 要求的 `x-opencode-session`
+- `/api/models`、`/api/chat/completions` 按 `x-card-tree-provider` 请求头路由到四家上游之一（缺省 opencode go），自动注入 `Authorization`；opencode go 额外补它要求的 `x-opencode-session`
 - 聊天响应是**逐块 read→write→flush 透传**的，所以流式还是一行一行出（不是等全部生成完才一次性出现）
 - `127.0.0.1` 属于安全上下文，IndexedDB / localStorage 都正常；APK 里不注册 Service Worker（资源本来就在本地，避免升级后读到旧缓存）
 - 返回键：先关弹层 → 再回树 → 都没有才退出 App；状态栏 / 导航栏颜色跟随深浅色
@@ -181,12 +220,13 @@ cd ../android
 
 **已经验到什么程度**
 
-- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 7 / versionName 0.3.4、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
+- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 8 / versionName 0.3.5、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
 - `apksigner verify`：release APK 用 `card-tree-mobile` 自己的 keystore 签名（v2），证书 DN `CN=CardTree Mobile`，不是 debug 证书
-- APK 里 156 个网页资源齐全（index.html、manifest、icon 180/192/512、单个 hash 化的 js/css），端口固定与自动备份的 Java 代码都在包里
+- APK 里 156 个网页资源齐全（index.html、manifest、icon 180/192/512、单个 hash 化的 js/css），端口固定、自动备份与四家路由的 Java 代码都在包里
 - **热更新器全链路验过**：真实 GitHub API 检查（同版本返回「无更新」、旧版本能查到 `web-v0.3.4`）；用本地服务器扮演 GitHub 完整跑了一遍「下载 → sha256 校验 → 解压 156 个文件 → 原子切换 → LocalServer 从新目录发页面」，坏 sha256 被正确拒绝且不污染现有目录（详见 `docs/ANDROID.md`）
 - 把同一份 `LocalServer` 拿到桌面 JVM 上真跑了一遍：静态资源 / SPA 回退 / 404 / `/api/health`（含 `search:true`）/ `/api/models`（42 KB、32 个模型）/ `/api/chat/completions` 真实 SSE（29 个 chunk、首块 1ms、27 条 `data:` 事件）/ **`/api/deepseek/search` 真实搜索（200、771ms，返回 中国天气网 / 钱江晚报 两条真实结果）**
-- 新增交互（搜索、长按菜单、编辑、继续生成、项目背景、自动备份入口）用 Chrome CDP 在 390×844 视口逐屏截图验过，见上方截图
+- **四家订阅路由冒烟（0.3.5）**：中继上 `GET /api/models` 带 `x-card-tree-provider` 四家全 200；kimi / deepseek / opencode 流式对话真跑通（31 / 17 / 8 chunks）；智谱返回 429「套餐已到期」原样透传；未知头 400 `provider_unknown`；设置页「连接」节随当前订阅显示（假桥注入 CDP 验证）
+- 新增交互（搜索、长按菜单、编辑、继续生成、项目背景、自动备份入口、订阅 pills、风格 pills、折叠分支）用 Chrome CDP 在 390×844 视口逐屏截图验过，见上方截图
 - **附件端到端验过**：在 390×844 视口里用真实文件选择框塞进一个 txt + 一张图，选 `claude-haiku-5-5` 提问，模型正确答出文本里的型号（X-200）和图片里的数字（42）；两个附件都落进了 IndexedDB
 - **联网搜索端到端验过**：在 390×844 视口里点亮「联网搜索」问「杭州今天天气怎么样？」，真实搜到 5 条来源（中国天气网 / 墨迹 / 东方天气…），回答里带 `[1]–[5]` 引用，卡片底部来源列表可点；搜索摘要确实进了模型上下文（思考过程里能看到 5 条资料）
 - **没有在真机或模拟器上跑过**：这台机器没有硬件虚拟化，开不了 Android 模拟器。装到手机上如果遇到问题，把现象发回来即可
@@ -238,14 +278,15 @@ node server.mjs              # 检测到证书，自动切成 https
 
 ### API Key 在哪
 
-**APK**：首次启动时粘一次，之后由 Android Keystore（AES-256-GCM）加密存在手机里，可以在「设置 → 连接」里替换或清除；Key 不会上传，也不随备份导出。
+**APK**：首次启动时粘一次当前订阅的，之后由 Android Keystore（AES-256-GCM）加密存在手机里，可以在「设置 → 连接」里替换或清除；每家订阅一把、分开加密，DeepSeek 官方那把和联网搜索共用。Key 不会上传，也不随备份导出。
 
-**网页版**：中继进程 `app/server.mjs` 会自动从 `~/.dsh/.credentials.yaml` 里读 `OPENCODE_GO_API_KEY`（只读这一行，不碰其它凭据）。
+**网页版**：中继进程 `app/server.mjs` 会自动从 `~/.dsh/.credentials.yaml` 里读四家 Key（`OPENCODE_GO_API_KEY` / `ZAI_CODING_CN_API_KEY` / `KIMI_CODING_API_KEY` / `DEEPSEEK_API_KEY`，只读这些行，不碰其它凭据）。
 
 也可以临时覆盖，不写文件：
 
 ```powershell
-$env:OPENCODE_GO_API_KEY = "<你的 key>"
+$env:OPENCODE_GO_API_KEY = "<你的 key>"     # 对话默认订阅
+$env:KIMI_CODING_API_KEY = "<你的 key>"     # 想用哪家就配哪家
 node server.mjs
 ```
 
@@ -269,7 +310,7 @@ node scripts/publish-web.mjs --notes "这次改了什么"   # 加 --dry-run 先�
 ```
 card-tree-mobile/
 ├─ app/
-│  ├─ server.mjs                零依赖中继：静态托管 dist + /api/models + /api/chat/completions(SSE) + /api/deepseek/search + HTTP/HTTPS
+│  ├─ server.mjs                零依赖中继：静态托管 dist + 按 x-card-tree-provider 路由四家的 /api/models、/api/chat/completions(SSE) + /api/deepseek/search + HTTP/HTTPS
 │  ├─ scripts/make-cert.mjs     生成本地 CA 与服务器证书（装成 App 用）
 │  ├─ scripts/publish-web.mjs   把 dist/ 打包发布成 GitHub Release（网页层热更新）
 │  ├─ certs/                    自签证书（git 忽略；key.pem / ca.key 是私钥）
@@ -287,12 +328,12 @@ card-tree-mobile/
 ├─ android/                     Android 壳：WebView + 纯 Java 本地服务
 │  ├─ app/src/main/java/com/cardtree/mobile/
 │  │  ├─ MainActivity.java      WebView 壳、固定端口、返回键、文件选择、状态栏配色、导出备份
-│  │  ├─ LocalServer.java       127.0.0.1 固定端口的本地 HTTP 服务（静态资源 + /api 反代 + SSE 透传 + 搜索转发；静态资源优先读热更新目录）
-│  │  ├─ KeyVault.java          Android Keystore AES-256-GCM 加密保存 API Key（对话 / 搜索两把分开存）
+│  │  ├─ LocalServer.java       127.0.0.1 固定端口的本地 HTTP 服务（静态资源 + 四家 /api 路由 + SSE 透传 + 搜索转发；静态资源优先读热更新目录）
+│  │  ├─ KeyVault.java          Android Keystore AES-256-GCM 加密保存 API Key（四家订阅分开存，DeepSeek 与搜索共用一把）
 │  │  ├─ WebUpdater.java        热更新器：查 GitHub Releases → 下载 → sha256 校验 → 解压 → 原子切换
 │  │  └─ NativeBridge.java      注入给网页的 window.CardTreeNative（含 saveAutoBackup 自动备份与热更新三个方法）
 │  └─ app/src/main/assets/www/  构建时从 app/dist 复制进来（git 忽略）
-├─ dist/                        打包好的安装包：card-tree-mobile-0.3.4.apk
+├─ dist/                        打包好的安装包：card-tree-mobile-0.3.5.apk
 └─ docs/                        FEASIBILITY.md（可行性 + M0–M5 计划）、DESIGN.md（视觉语言）、ANDROID.md（APK 架构与构建）、RELAY.md（中继细节）、preview/（截图）
 ```
 
@@ -301,7 +342,7 @@ card-tree-mobile/
 - 所有项目存在**手机/浏览器本地** IndexedDB（库名 `card-tree-mobile`），不上传服务器
 - 设置存 `localStorage`（键 `card-tree:settings`）
 - 联网搜索的来源（标题 / 摘要 / 链接）随卡片一起存在 IndexedDB 的 `card.search` 里，导出 / 自动备份会带上
-- **两把 Key 分开存**：对话用的 opencode go Key 与搜索用的 DeepSeek Key 是两把。APK 里都在手机上（Android Keystore 加密，设置面板里分别保存）；网页版两把都在电脑上（`~/.dsh/.credentials.yaml` 或环境变量），手机不留
+- **Key 分开存**：四家订阅每家一把（DeepSeek 官方与联网搜索共用一把）。APK 里都在手机上（Android Keystore 加密，设置 → 连接跟随当前订阅）；网页版都在电脑上（`~/.dsh/.credentials.yaml` 或环境变量），手机不留
 - **APK 自动备份**：数据有改动后，退到后台或每 5 分钟写一份到手机的「下载 / CardTree / backups」，滚动保留最近 30 份；设置面板「数据 → 自动备份」里能看到上次时间、也能点「立即备份」
 - 换设备 / 备份：设置面板 →「导出当前项目」「导入备份」
 - 从桌面版迁移：设置面板 →「导入备份」直接选 `~/.dsh/card-tree/state.json`，会把里面每个项目拆成独立项目导入（运行中的卡片会标为可重试的错误态）
@@ -320,6 +361,8 @@ card-tree-mobile/
 10. 全览图能拖卡片改上级、拉引用线（包括把根卡片重新挂到别的卡片下面），但不能手动摆节点位置（位置自动排布）；在手机上节点可能缩得比较小，按偏一点也会抓住最近的卡片。
 11. 无本地工具（读文件 / 抓网页）、无语音；附件与联网搜索都已支持——但联网搜索要**单独配一把 DeepSeek API Key**，而且按搜索次数计费（每次提问搜 5 条），不用时把开关关掉即可。
 12. **热更新的下载走 GitHub 的文件 CDN**：国内网络偶尔拉不动 `objects.githubusercontent.com`（本机试过一次 1.8 MB 下了十几分钟）。拉不动时 App 会留在当前版本、下次再试，不影响使用；网络好的时候（或挂代理）秒下。检查更新本身走 `api.github.com`，在实测网络下一直正常。
+13. **四家订阅是「包月编码套餐」的路子**：智谱 Coding 的套餐会过期（本机实测返回 429「您的 GLM Coding Plan 套餐已到期」），过期后上游错误原样透传，续订即恢复；Kimi / opencode go 的套餐同理。模型列表和默认模型以各家 `/models` 返回为准。
+14. 0.3.5 的 Java 壳改了（多订阅原生桥），**从 0.3.2–0.3.4 升上来要重新装一次 APK**；之后纯网页层的改动又都走热更新，不用再重装。
 
 ## 技术栈
 

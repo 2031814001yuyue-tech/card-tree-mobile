@@ -18,6 +18,10 @@ export interface CardTreeNativeBridge {
   hasSearchKey(): boolean
   saveSearchKey(key: string): boolean
   clearSearchKey(): void
+  /** 各订阅各自的 Key（opencode / zai / kimi / deepseek） */
+  hasProviderKey(provider: string): boolean
+  saveProviderKey(provider: string, key: string): boolean
+  clearProviderKey(provider: string): void
   /** 网页层热更新：当前网页层版本（没热更新过时等于壳版本） */
   getWebVersion(): string
   /** 检查更新，返回 JSON 字符串（见 checkNativeWebUpdate 的返回类型） */
@@ -76,6 +80,16 @@ export const nativeVersion = (): string | null => {
   }
 }
 
+/**
+ * 0.3.5 及以上的壳才有按订阅分存的 Key 方法。
+ * 网页版（无桥）永远 true；旧 APK 上返回 false，多订阅 UI 会自动隐藏，
+ * 热更新把新网页层推给旧壳时也不至于出现填了存不上的界面。
+ */
+export const nativeSupportsProviders = (): boolean => {
+  const bridge = nativeBridge()
+  return bridge === null || typeof bridge.hasProviderKey === 'function'
+}
+
 /** 把导出备份交给原生保存（下载目录），返回落点描述或 null */
 export const saveNativeBackup = (json: string, name: string): string | null => {
   try {
@@ -113,6 +127,32 @@ export const saveNativeSearchKey = (key: string): boolean => {
 export const clearNativeSearchKey = (): void => {
   try {
     nativeBridge()?.clearSearchKey()
+  } catch {
+    // 同上：失败不阻塞界面
+  }
+}
+
+/** 某家订阅（opencode / zai / kimi / deepseek）在这台手机上有没有配 Key */
+export const nativeHasProviderKey = (provider: string): boolean => {
+  try {
+    return nativeBridge()?.hasProviderKey(provider) === true
+  } catch {
+    return false
+  }
+}
+
+/** 保存某家订阅的 Key（Keystore 加密）；成功后原生侧会触发 __cardTreeKeyChanged */
+export const saveNativeProviderKey = (provider: string, key: string): boolean => {
+  try {
+    return nativeBridge()?.saveProviderKey(provider, key) === true
+  } catch {
+    return false
+  }
+}
+
+export const clearNativeProviderKey = (provider: string): void => {
+  try {
+    nativeBridge()?.clearProviderKey(provider)
   } catch {
     // 同上：失败不阻塞界面
   }

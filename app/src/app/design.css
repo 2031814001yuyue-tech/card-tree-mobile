@@ -71,6 +71,120 @@ body {
     'Segoe UI Variable', 'Microsoft YaHei', system-ui, sans-serif;
 }
 
+/*
+ * 界面风格（0.3.5 起）：不改组件，只覆盖 --ct-* 颜色 token。
+ * 选择器特异性：body[data-style] (0,1,1) > :root (0,1,0)，
+ * 各风格的深色变体 body[data-ds-dark-theme][data-style] (0,2,1) 再压一层。
+ * 交互强调色（蓝 / 绿 / 琥珀 / 危险）除羊皮纸微调外保持一致——换风格不换品牌。
+ */
+
+/* 素笺：纯白、无纸纹、极轻的线 —— 安静得像一叠新信纸 */
+body[data-style='plain'] {
+  --ct-paper: #ffffff;
+  --ct-surface: #ffffff;
+  --ct-surface-sunken: #f3f4f8;
+  --ct-ink: #17181d;
+  --ct-ink-soft: #5a5f6d;
+  --ct-ink-faint: #8d92a1;
+  --ct-line: #e9eaef;
+  --ct-line-strong: #dbdde5;
+  --ct-thread: #cfd2dc;
+  --ct-branch: #c6cad6;
+  --ct-card-shadow: 0 1px 2px rgba(19, 24, 40, 0.03), 0 8px 20px -20px rgba(19, 24, 40, 0.22);
+  --ct-grain: none;
+}
+
+body[data-ds-dark-theme][data-style='plain'] {
+  --ct-paper: #0c0c0f;
+  --ct-surface: #15151b;
+  --ct-surface-sunken: #1e1f27;
+  --ct-ink: #ebeef5;
+  --ct-ink-soft: #a6acbd;
+  --ct-ink-faint: #707689;
+  --ct-line: #24252e;
+  --ct-line-strong: #353744;
+  --ct-thread: #3b3e4d;
+  --ct-branch: #474b5d;
+  --ct-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* 羊皮纸：暖米纸面 + 暖墨，长出来的树像手写笔记 */
+body[data-style='parchment'] {
+  --ct-paper: #f5efe2;
+  --ct-surface: #fdfaf1;
+  --ct-surface-sunken: #ede4cf;
+  --ct-ink: #2e2a20;
+  --ct-ink-soft: #6d6450;
+  --ct-ink-faint: #9a8f77;
+  --ct-line: #e3d9bf;
+  --ct-line-strong: #d4c7a6;
+  --ct-thread: #c8ba95;
+  --ct-branch: #baa97f;
+  --ct-card-shadow: 0 1px 2px rgba(74, 60, 28, 0.06), 0 12px 24px -22px rgba(74, 60, 28, 0.4);
+  /* 暖纸上冷蓝很跳，换成偏暖的深靛 */
+  --ct-blue: #5a5bd8;
+  --ct-blue-soft: rgba(90, 91, 216, 0.12);
+  --ct-grow: #47855a;
+  --ct-grow-soft: rgba(71, 133, 90, 0.14);
+  --ct-amber: #a2691a;
+}
+
+body[data-ds-dark-theme][data-style='parchment'] {
+  --ct-paper: #17130e;
+  --ct-surface: #211c14;
+  --ct-surface-sunken: #2c261c;
+  --ct-ink: #efe6d0;
+  --ct-ink-soft: #b3a78b;
+  --ct-ink-faint: #857a60;
+  --ct-line: #332c1f;
+  --ct-line-strong: #463d2b;
+  --ct-thread: #4d4430;
+  --ct-branch: #5a5038;
+  --ct-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --ct-blue: #8c8df4;
+  --ct-blue-soft: rgba(140, 141, 244, 0.18);
+  --ct-grow: #6cab7e;
+  --ct-grow-soft: rgba(108, 171, 126, 0.16);
+  --ct-amber: #d9a94e;
+}
+
+/* 石墨：冷灰纸面 + 更硬的对比，像建筑草图 */
+body[data-style='graphite'] {
+  --ct-paper: #eef0f4;
+  --ct-surface: #ffffff;
+  --ct-surface-sunken: #e2e5ee;
+  --ct-ink: #12141a;
+  --ct-ink-soft: #525866;
+  --ct-ink-faint: #7d8493;
+  --ct-line: #dce0ea;
+  --ct-line-strong: #c9cede;
+  --ct-thread: #bfc4d4;
+  --ct-branch: #b4bad0;
+  --ct-card-shadow: 0 1px 2px rgba(16, 20, 32, 0.06), 0 14px 26px -22px rgba(16, 20, 32, 0.45);
+  --ct-blue: #3556e0;
+  --ct-blue-soft: rgba(53, 86, 224, 0.1);
+  --ct-grow: #2f8f66;
+  --ct-grow-soft: rgba(47, 143, 102, 0.12);
+}
+
+body[data-ds-dark-theme][data-style='graphite'] {
+  --ct-paper: #090a0d;
+  --ct-surface: #121319;
+  --ct-surface-sunken: #1b1d25;
+  --ct-ink: #e4e8f1;
+  --ct-ink-soft: #98a0b4;
+  --ct-ink-faint: #697086;
+  --ct-line: #212430;
+  --ct-line-strong: #333746;
+  --ct-thread: #3a3f50;
+  --ct-branch: #484e63;
+  --ct-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --ct-blue: #5d76ff;
+  --ct-blue-soft: rgba(93, 118, 255, 0.16);
+  --ct-grow: #3fae7f;
+  --ct-grow-soft: rgba(63, 174, 127, 0.15);
+}
+
 /* 动效底线：系统要求减少动画时，全部收掉 */
 @media (prefers-reduced-motion: reduce) {
   *,

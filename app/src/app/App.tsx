@@ -12,12 +12,20 @@ import {
 import { showToast } from '../components/base/toastState.js'
 import { Sheet } from '../components/common/Sheet.js'
 import { ASK_MODES, Composer, type AskMode } from '../components/composer/Composer.js'
-import { fetchSearchAvailability } from '../services/search.js'
+import { fetchRelayInfo } from '../services/search.js'
 import { Overview } from '../components/overview/Overview.js'
 import { ProjectDrawer } from '../components/projects/ProjectDrawer.js'
 import { SettingsSheet } from '../components/settings/SettingsSheet.js'
 import { readAttachmentFiles } from '../services/attachments.js'
-import { isNativeApp, nativeHasKey, saveNativeKey } from '../services/native.js'
+import { providerById } from '../services/api/providers.js'
+import {
+  isNativeApp,
+  nativeHasKey,
+  nativeHasProviderKey,
+  nativeSupportsProviders,
+  saveNativeKey,
+  saveNativeProviderKey,
+} from '../services/native.js'
 import { setUpdateState } from '../services/update.js'
 import { useSettings } from '../services/settings.js'
 import type { Attachment } from '../services/tree/types.js'
@@ -32,6 +40,13 @@ export const App = () => {
   const isMobile = useIsMobile()
   const frameRef = useMobileViewport(isMobile)
   usePreventPageScroll(isMobile)
+
+  /** 主滚动容器：流式跟随、进卡片 / 回树的滚动恢复都挂在它上面 */
+  const mainRef = useRef<HTMLElement | null>(null)
+  /** 离开树视图时记下滚动位置，回来时还原 */
+  const treeScrollRef = useRef(0)
+  /** 流式生成时是否自动跟随：用户往回翻就停，重新滚到底部又恢复 */
+  const followRef = useRef(true)
 
   const ready = useStore((state) => state.ready)
   const projects = useStore((state) => state.projects)
@@ -74,6 +89,7 @@ export const App = () => {
 
   const apiBase = useSettings((state) => state.apiBase)
   const locale = useSettings((state) => state.locale)
+  const provider = useSettings((state) => state.provider)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -102,10 +118,18 @@ export const App = () => {
   const [draftAttachments, setDraftAttachments] = useState<Attachment[]>([])
   /** 中继 / APK 里有没有配 DeepSeek Key（决定联网开关是否可用） */
   const [searchAvailable, setSearchAvailable] = useState(false)
+  /** 中继 / APK 里各家订阅有没有配 Key（设置页展示用） */
+  const [relayProviders, setRelayProviders] = useState<Record<string, boolean> | null>(null)
   /** 这次提问要不要先联网搜 */
   const [searchOn, setSearchOn] = useState(false)
-  /** APK 首次启动还没有 API Key 时，强制先填一次 */
-  const [keyNeeded, setKeyNeeded] = useState(() => isNativeApp() && !nativeHasKey())
+  /** APK 首次启动、当前订阅还没有 Key 时，强制先填一次 */
+  const [keyNeeded, setKeyNeeded] = useState(() => {
+    if (!isNativeApp()) {
+      return false
+    }
+    const provider = useSettings.getState().provider
+    return nativeSupportsProviders() ? !nativeHasProviderKey(provider) : !nativeHasKey()
+  })
   const [keyValue, setKeyValue] = useState('')
 
   useEffect(() => {
@@ -119,12 +143,14 @@ export const App = () => {
     }
   }, [apiBase, ready, loadModels])
 
-  // 中继/APK 有没有配 DeepSeek Key：决定联网搜索开关是实心可用还是「未开通」
+  // 中继/APK 有没有配 DeepSeek Key：决定联网搜索开关是实心可用还是「未开通」；
+  // 顺带把各家订阅有没有配 Key 拿回来给设置页展示
   useEffect(() => {
     let alive = true
-    void fetchSearchAvailability(apiBase).then((value) => {
+    void fetchRelayInfo(apiBase).then((info) => {
       if (alive) {
-        setSearchAvailable(value)
+        setSearchAvailable(info?.search === true)
+        setRelayProviders(info?.providers ?? null)
       }
     })
     return () => {
@@ -135,6 +161,54 @@ export const App = () => {
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
+
+  // ── 滚动体验 ──
+  // 打开卡片前记下树视图的滚动位置，回树时还原；进卡片从顶部开始
+  const handleOpenCard = (cardId: string) => {
+    const el = mainRef.current
+    if (el && view === 'tree') {
+      treeScrollRef.current = el.scrollTop
+    }
+    openCard(cardId)
+  }
+
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) {
+      return
+    }
+    if (view === 'tree') {
+      el.scrollTop = treeScrollRef.current
+    } else {
+      el.scrollTop = 0
+      // 新卡片从顶部开始看，流式时默认继续跟随
+      followRef.current = true
+    }
+  }, [view, activeCardId])
+
+  // 流式生成时自动跟随滚动：用户往回翻（离底部超过 120px）就停，
+  // 重新滚回底部附近自动恢复，不打断阅读
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) {
+      return
+    }
+    const onScroll = () => {
+      followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el || !live || view !== 'card') {
+      return
+    }
+    if (followRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [live, view])
 
   // 给 Android 返回键用：先关浮层，再回树，都不满足就交给系统退出
   useEffect(() => {
@@ -285,6 +359,8 @@ export const App = () => {
   const isRunning = running !== null
   const cardRunning = Boolean(card && running && running.cardId === card.id)
   const cardLive = card && live && live.cardId === card.id ? live : null
+  /** 首次启动引导 Sheet 展示的订阅名 */
+  const providerLabel = providerById(provider).label
 
   /** 引用选择器里能选的卡片：自己和已有的引用都排除掉 */
   const refCandidates = useMemo(() => {
@@ -329,9 +405,12 @@ export const App = () => {
     setDraftAttachments([])
     return attachments
   }
-  /** 重新问一次服务端：联网搜索的 Key 配好了没 */
+  /** 重新问一次服务端：联网搜索的 Key 配好了没、各家订阅配了哪几家 */
   const refreshSearch = () => {
-    void fetchSearchAvailability(useSettings.getState().apiBase).then(setSearchAvailable)
+    void fetchRelayInfo(useSettings.getState().apiBase).then((info) => {
+      setSearchAvailable(info?.search === true)
+      setRelayProviders(info?.providers ?? null)
+    })
   }
 
   /** 联网搜索开关：服务端没配 DeepSeek Key 时，引导去设置里配 */
@@ -434,7 +513,7 @@ export const App = () => {
         </div>
       </header>
 
-      <main className={styles.main}>
+      <main className={styles.main} ref={mainRef}>
         {view === 'card' && card ? (
           <CardView
             project={project}
@@ -458,7 +537,7 @@ export const App = () => {
             project={project}
             liveCardId={live?.cardId ?? null}
             liveAnswer={live?.answer ?? ''}
-            onOpen={openCard}
+            onOpen={handleOpenCard}
             onQuickMenu={setQuickCardId}
           />
         )}
@@ -552,6 +631,7 @@ export const App = () => {
           })
         }
         lastBackupAt={lastBackupAt}
+        relayProviders={relayProviders}
         onRefreshSearch={refreshSearch}
         onBackupNow={() => {
           const saved = backupNow()
@@ -570,7 +650,7 @@ export const App = () => {
           cards={project.cards}
           activeCardId={activeCardId}
           onOpen={(cardId) => {
-            openCard(cardId)
+            handleOpenCard(cardId)
             setOverviewOpen(false)
           }}
           onClose={() => setOverviewOpen(false)}
@@ -718,7 +798,7 @@ export const App = () => {
             className={styles.quickItem}
             onClick={() => {
               if (quickCard) {
-                openCard(quickCard.id)
+                handleOpenCard(quickCard.id)
               }
               setQuickCardId(null)
             }}
@@ -741,7 +821,7 @@ export const App = () => {
             className={styles.quickItem}
             onClick={() => {
               if (quickCard) {
-                openCard(quickCard.id)
+                handleOpenCard(quickCard.id)
                 setQuickCardId(null)
                 setRefPickerOpen(true)
               }
@@ -791,7 +871,7 @@ export const App = () => {
         </div>
       </Sheet>
 
-      <Sheet open={keyNeeded} title="先连上 opencode go" onClose={() => setKeyNeeded(false)}>
+      <Sheet open={keyNeeded} title={`先连上 ${providerLabel}`} onClose={() => setKeyNeeded(false)}>
         <form
           className={styles.keyForm}
           onSubmit={(event) => {
@@ -801,7 +881,10 @@ export const App = () => {
               showToast('先粘贴一下 API Key')
               return
             }
-            if (!saveNativeKey(value)) {
+            const saved = nativeSupportsProviders()
+              ? saveNativeProviderKey(useSettings.getState().provider, value)
+              : saveNativeKey(value)
+            if (!saved) {
               showToast('保存失败，再试一次')
               return
             }
@@ -812,8 +895,8 @@ export const App = () => {
           }}
         >
           <p className={styles.keyHint}>
-            把 opencode go 的 API Key 粘在这里。它会加密保存在这台手机上（Android Keystore），
-            之后打开就能直接提问，不需要电脑。
+            把 {providerLabel} 的 API Key 粘在这里。它会加密保存在这台手机上（Android Keystore），
+            之后打开就能直接提问，不需要电脑。其它订阅可以之后在「设置 → 订阅与模型」里切换并各自填 Key。
           </p>
           <input
             className={styles.keyInput}
@@ -827,7 +910,7 @@ export const App = () => {
           <button type="submit" className={styles.keyButton}>
             保存并开始
           </button>
-          <p className={styles.keyFine}>没有 Key？可以在电脑上运行 opencode，用它的账号页生成。</p>
+          <p className={styles.keyFine}>没有 Key？可以在对应订阅的官网 / 客户端账号页生成。</p>
         </form>
       </Sheet>
 

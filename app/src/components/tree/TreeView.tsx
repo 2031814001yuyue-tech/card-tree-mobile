@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent } from 'react'
 import type { Card, CardMode, Project } from '../../services/tree/types.js'
 import { IconChevronRightOutline14, IconCloseOutline16, IconSearchOutline16 } from '../base/icons.js'
@@ -19,6 +19,19 @@ const STATUS_LABEL: Record<Card['status'], string> = {
   done: '',
   partial: '中断',
   error: '出错',
+}
+
+/** 折叠状态存在 localStorage：下次打开还记得哪些分支收着 */
+const COLLAPSED_KEY = 'card-tree:collapsed'
+
+const readCollapsed = (): string[] => {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 /** 从 Markdown 回答里取一段纯文字预览：公式、代码、标记都去掉，只留句子 */
@@ -51,6 +64,9 @@ type NodeProps = {
   childrenOf: (parentId: string) => Card[]
   /** 搜索时只显示命中的卡片 + 它们的祖先链 */
   isVisible: (cardId: string) => boolean
+  /** 收起来的分支（搜索时强制全部展开，忽略这个集合） */
+  collapsed: Set<string>
+  onToggleCollapse: (cardId: string) => void
   liveCardId: string | null
   liveAnswer: string
   onOpen: (cardId: string) => void
@@ -62,6 +78,8 @@ const Node = ({
   order,
   childrenOf,
   isVisible,
+  collapsed,
+  onToggleCollapse,
   liveCardId,
   liveAnswer,
   onOpen,
@@ -70,9 +88,13 @@ const Node = ({
   const streaming = liveCardId === card.id
   const answer = streaming ? liveAnswer : card.answer
   const status: Card['status'] = streaming ? 'running' : card.status
-  const kids = childrenOf(card.id).filter((kid) => isVisible(kid.id))
+  const kidCount = childrenOf(card.id).filter((kid) => isVisible(kid.id)).length
+  const folded = collapsed.has(card.id)
+  const kids = folded
+    ? []
+    : childrenOf(card.id).filter((kid) => isVisible(kid.id))
   const counts = [
-    kids.length ? `${kids.length} 支` : '',
+    kidCount ? `${kidCount} 支` : '',
     card.followUps.length ? `${card.followUps.length} 追问` : '',
     card.refs.length ? `${card.refs.length} 引用` : '',
   ].filter(Boolean)
@@ -156,6 +178,20 @@ const Node = ({
         </button>
       </div>
 
+      {kidCount > 0 ? (
+        <button
+          type="button"
+          className={styles.fold}
+          aria-expanded={!folded}
+          onClick={() => onToggleCollapse(card.id)}
+        >
+          <span className={folded ? styles.foldIcon : styles.foldIconOpen}>
+            <IconChevronRightOutline14 />
+          </span>
+          {folded ? `${kidCount} 张子卡片` : '收起分支'}
+        </button>
+      ) : null}
+
       {kids.length > 0 ? (
         <ul className={styles.children}>
           {kids.map((kid, index) => (
@@ -165,6 +201,8 @@ const Node = ({
               order={index}
               childrenOf={childrenOf}
               isVisible={isVisible}
+              collapsed={collapsed}
+              onToggleCollapse={onToggleCollapse}
               liveCardId={liveCardId}
               liveAnswer={liveAnswer}
               onOpen={onOpen}
@@ -190,6 +228,24 @@ export type TreeViewProps = {
 export const TreeView = ({ project, liveCardId, liveAnswer, onOpen, onQuickMenu }: TreeViewProps) => {
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
+  const [collapsed, setCollapsed] = useState<string[]>(() => readCollapsed())
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed))
+    } catch {
+      // 记不住就只在本次会话生效，不致命
+    }
+  }, [collapsed])
+
+  const toggleCollapse = (cardId: string) => {
+    setCollapsed((prev) =>
+      prev.includes(cardId) ? prev.filter((id) => id !== cardId) : [...prev, cardId]
+    )
+  }
+
+  /** 搜索时强制全部展开：搜索是为了找卡，折叠不该挡路 */
+  const collapsedSet = useMemo(() => (q ? new Set<string>() : new Set(collapsed)), [collapsed, q])
 
   /** 命中的卡片 + 一路向上的祖先，保证搜索结果还能看出它在树里的位置 */
   const visible = useMemo(() => {
@@ -286,6 +342,8 @@ export const TreeView = ({ project, liveCardId, liveAnswer, onOpen, onQuickMenu 
               order={index}
               childrenOf={childrenOf}
               isVisible={isVisible}
+              collapsed={collapsedSet}
+              onToggleCollapse={toggleCollapse}
               liveCardId={liveCardId}
               liveAnswer={liveAnswer}
               onOpen={onOpen}

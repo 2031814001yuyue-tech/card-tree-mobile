@@ -8,14 +8,22 @@
  *
  * 提供的能力：
  *   1. 静态托管 app/dist（SPA：无扩展名路径回退 index.html）
- *   2. GET  /api/health            健康检查（不泄露 Key）
- *   3. GET  /api/models            代理上游模型列表，内存缓存 5 分钟
- *   4. POST /api/chat/completions  代理上游流式聊天，字节级 SSE 透传
- *   5. GET  /ca.pem  /ca.crt       自签根证书下载（手机「装成 App」要先信任它）
+ *   2. GET  /api/health            健康检查（不泄露 Key，含 providers 可用表）
+ *   3. GET  /api/models            按订阅代理上游模型列表，内存缓存 5 分钟
+ *   4. POST /api/chat/completions  按订阅代理上游流式聊天，字节级 SSE 透传
+ *   5. POST /api/deepseek/search   联网搜索（DeepSeek 官方 Search API）
+ *   6. GET  /ca.pem  /ca.crt       自签根证书下载（手机「装成 App」要先信任它）
+ *
+ * 订阅（0.3.5 起）：四家上游全部 OpenAI 兼容，浏览器用 x-card-tree-provider
+ * 头选择（缺省 opencode）：opencode / zai（智谱 Coding）/ kimi（Kimi Coding）/ deepseek。
+ * 各家的 Key 独立配置，配几家开几家。
  *
  * 启动：node server.mjs
  * 可选环境变量：PORT（默认 8787）、HOST（默认 0.0.0.0）、DIST_DIR、
- *              OPENCODE_GO_API_KEY、OPENCODE_GO_BASE_URL
+ *              OPENCODE_GO_API_KEY、OPENCODE_GO_BASE_URL、
+ *              ZAI_CODING_CN_API_KEY、ZAI_CODING_BASE_URL、
+ *              KIMI_CODING_API_KEY、KIMI_CODING_BASE_URL、
+ *              DEEPSEEK_API_KEY、DEEPSEEK_BASE_URL、DEEPSEEK_SEARCH_URL
  *              HTTPS=0 强制 HTTP / HTTPS=1 强制 HTTPS（默认：certs/ 里有证书就 HTTPS）
  *              HTTPS_CERT、HTTPS_KEY 自定义证书路径
  */
@@ -35,24 +43,69 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const PORT = Number.parseInt(process.env.PORT ?? '', 10) || 8787
 const HOST = process.env.HOST || '0.0.0.0'
-/** 上游 OpenAI 兼容服务根地址（不带末尾斜杠） */
-const UPSTREAM = (process.env.OPENCODE_GO_BASE_URL || 'https://opencode.ai/zen/go/v1').replace(
-  /\/+$/,
-  ''
-)
+/**
+ * 四家订阅上游（全部 OpenAI 兼容）。浏览器用 `x-card-tree-provider` 头选择走哪家，
+ * 缺省按 opencode（兼容旧网页层）。Key 读取顺序同旧版：环境变量 → ~/.dsh/.credentials.yaml。
+ * envKey 就是 ~/.dsh/.credentials.yaml 里的字段名。
+ */
+const PROVIDER_HEADER = 'x-card-tree-provider'
+const PROVIDERS = [
+  {
+    id: 'opencode',
+    label: 'opencode go',
+    base: (process.env.OPENCODE_GO_BASE_URL || 'https://opencode.ai/zen/go/v1').replace(/\/+$/, ''),
+    envKey: 'OPENCODE_GO_API_KEY',
+    /** 只有 opencode 要求 x-opencode-session + 自定义 User-Agent */
+    sessionNeeded: true,
+    key: null,
+    keySource: null,
+  },
+  {
+    id: 'zai',
+    label: '智谱 Coding',
+    base: (process.env.ZAI_CODING_BASE_URL || 'https://open.bigmodel.cn/api/coding/paas/v4').replace(
+      /\/+$/,
+      ''
+    ),
+    envKey: 'ZAI_CODING_CN_API_KEY',
+    sessionNeeded: false,
+    key: null,
+    keySource: null,
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi Coding',
+    base: (process.env.KIMI_CODING_BASE_URL || 'https://api.kimi.com/coding/v1').replace(/\/+$/, ''),
+    envKey: 'KIMI_CODING_API_KEY',
+    sessionNeeded: false,
+    key: null,
+    keySource: null,
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek 官方',
+    base: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, ''),
+    envKey: 'DEEPSEEK_API_KEY',
+    sessionNeeded: false,
+    key: null,
+    keySource: null,
+  },
+]
+/** 默认上游（opencode go）：消息文案与健康检查里还用它 */
+const UPSTREAM = PROVIDERS[0].base
 /** 前端构建产物目录；DIST_DIR 可覆盖 */
 const DIST_DIR = path.resolve(process.env.DIST_DIR || path.join(__dirname, 'dist'))
 const CREDENTIALS_FILE = path.join(homedir(), '.dsh', '.credentials.yaml')
-/** 只匹配 OPENCODE_GO_API_KEY 这一行，不把其它凭据读进来 */
-const API_KEY_PATTERN = /(?:^|\n)\s*OPENCODE_GO_API_KEY\s*:\s*["']?([^"'\r\n#]+)/
+/** 从 ~/.dsh/.credentials.yaml 里按字段名抓一行 Key（不把其它凭据读进来） */
+const credentialPattern = (envName) =>
+  new RegExp(`(?:^|\\n)\\s*${envName}\\s*:\\s*["']?([^"'\\r\\n#]+)`)
 const MODELS_CACHE_TTL = 5 * 60 * 1000
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MODELS_TIMEOUT_MS = 20_000
 
 // ── DeepSeek 官方 Search API（联网搜索）──
-// 与 opencode go 的订阅 Key 无关，用的是 DeepSeek 账号的 API Key；
+// 用的就是上面 providers 表里 deepseek 那把 Key（DeepSeek 账号）；
 // 没配就只是「联网搜索不可用」，不影响聊天。
-const DEEPSEEK_KEY_PATTERN = /(?:^|\n)\s*DEEPSEEK_API_KEY\s*:\s*["']?([^"'\r\n#]+)/
 const DEEPSEEK_SEARCH_URL = (
   process.env.DEEPSEEK_SEARCH_URL || 'https://api.deepseek.com/v1/tools/search'
 ).trim()
@@ -97,56 +150,17 @@ const sessionForRequest = (req) => {
 // ─────────────────────────── API Key ───────────────────────────
 
 /**
- * 按 环境变量 → ~/.dsh/.credentials.yaml 的顺序取 Key。
- * 返回 null 时由调用方给出中文提示并退出，绝不静默降级。
+ * 按订阅取 Key：环境变量 → ~/.dsh/.credentials.yaml。
+ * 返回 null 时这家订阅就是「没配」，对应请求给 409 提示，不影响其它家。
  */
-const loadApiKey = () => {
-  const fromEnv = (process.env.OPENCODE_GO_API_KEY ?? '').trim()
+const loadCredentialKey = (envName) => {
+  const fromEnv = (process.env[envName] ?? '').trim()
   if (fromEnv) {
-    return { key: fromEnv, source: '环境变量 OPENCODE_GO_API_KEY' }
+    return { key: fromEnv, source: `环境变量 ${envName}` }
   }
   try {
     const text = readFileSync(CREDENTIALS_FILE, 'utf8')
-    const matched = API_KEY_PATTERN.exec(text)
-    const fromFile = matched?.[1]?.trim()
-    if (fromFile) {
-      return { key: fromFile, source: CREDENTIALS_FILE }
-    }
-  } catch {
-    // 文件不存在或不可读：走下面的统一报错
-  }
-  return null
-}
-
-const loadedKey = loadApiKey()
-if (!loadedKey) {
-  console.error('')
-  console.error('✗ 启动失败：没有找到 OPENCODE_GO_API_KEY。')
-  console.error('')
-  console.error('  任选一种方式配置后重试：')
-  console.error('  1) 设置环境变量（当前终端有效）：')
-  console.error('     PowerShell:  $env:OPENCODE_GO_API_KEY = "<你的 key>"')
-  console.error('     CMD:         set OPENCODE_GO_API_KEY=<你的 key>')
-  console.error('  2) 写入 DSH 凭据文件：')
-  console.error(`     ${CREDENTIALS_FILE}`)
-  console.error('     追加一行：OPENCODE_GO_API_KEY: <你的 key>')
-  console.error('')
-  process.exit(1)
-}
-const API_KEY = loadedKey.key
-
-/**
- * DeepSeek 官方 API Key（联网搜索用）。取不到不报错，只是搜索功能不可用。
- * 顺序：环境变量 DEEPSEEK_API_KEY → ~/.dsh/.credentials.yaml。
- */
-const loadDeepSeekKey = () => {
-  const fromEnv = (process.env.DEEPSEEK_API_KEY ?? '').trim()
-  if (fromEnv) {
-    return { key: fromEnv, source: '环境变量 DEEPSEEK_API_KEY' }
-  }
-  try {
-    const text = readFileSync(CREDENTIALS_FILE, 'utf8')
-    const matched = DEEPSEEK_KEY_PATTERN.exec(text)
+    const matched = credentialPattern(envName).exec(text)
     const fromFile = matched?.[1]?.trim()
     if (fromFile) {
       return { key: fromFile, source: CREDENTIALS_FILE }
@@ -157,8 +171,57 @@ const loadDeepSeekKey = () => {
   return null
 }
 
-const loadedDeepSeekKey = loadDeepSeekKey()
-const DEEPSEEK_KEY = loadedDeepSeekKey?.key ?? null
+for (const provider of PROVIDERS) {
+  const loaded = loadCredentialKey(provider.envKey)
+  provider.key = loaded?.key ?? null
+  provider.keySource = loaded?.source ?? null
+}
+
+const configuredCount = PROVIDERS.filter((provider) => provider.key !== null).length
+if (configuredCount === 0) {
+  console.error('')
+  console.error('✗ 启动失败：一把订阅 Key 都没找到。')
+  console.error('')
+  console.error('  四家订阅各配各的 Key，任选一种方式（配几家开几家）：')
+  for (const provider of PROVIDERS) {
+    console.error(`  - ${provider.label}: 环境变量 ${provider.envKey}，或 ${CREDENTIALS_FILE} 里加一行`)
+    console.error(`      ${provider.envKey}: <你的 key>`)
+  }
+  console.error('')
+  process.exit(1)
+}
+
+const API_KEY = PROVIDERS[0].key
+
+/** DeepSeek 官方 Key（联网搜索用），与 deepseek 订阅是同一把 */
+const DEEPSEEK_KEY = PROVIDERS.find((provider) => provider.id === 'deepseek')?.key ?? null
+const loadedDeepSeekKey = {
+  source: PROVIDERS.find((provider) => provider.id === 'deepseek')?.keySource ?? null,
+}
+
+/** 解析请求想走哪家：缺头/空头按 opencode；表里没有的 id 返回 null（调用方回 400） */
+const resolveProvider = (req) => {
+  const header = req.headers[PROVIDER_HEADER]
+  const id = (typeof header === 'string' ? header : '').trim().toLowerCase()
+  if (!id) {
+    return PROVIDERS[0]
+  }
+  return PROVIDERS.find((provider) => provider.id === id) ?? null
+}
+
+const providerUnavailable = (provider) => ({
+  error: {
+    code: 'provider_unavailable',
+    message: `还没有配置「${provider.label}」的 API Key，到电脑上配好 ${provider.envKey} 后重启中继；APK 里则是「设置 → 连接」里粘贴。`,
+  },
+})
+
+const providerUnknown = (id) => ({
+  error: {
+    code: 'provider_unknown',
+    message: `未知的订阅 id：${id}。可用：${PROVIDERS.map((provider) => provider.id).join(' / ')}。`,
+  },
+})
 
 // ─────────────────────────── 小工具 ───────────────────────────
 
@@ -222,7 +285,10 @@ const lanAddresses = () => {
 
 const applyCors = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type, x-opencode-session')
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'authorization, content-type, x-opencode-session, x-card-tree-provider'
+  )
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Max-Age', '86400')
 }
@@ -295,9 +361,9 @@ const readRequestBody = (req) =>
 const healthPayload = () => ({
   ok: true,
   upstream: UPSTREAM,
-  hasKey: true,
+  hasKey: API_KEY !== null,
   // 只暴露长度，Key 本身永远不出现在任何响应、日志或文档里
-  keyLength: API_KEY.length,
+  keyLength: API_KEY === null ? null : API_KEY.length,
   node: process.version,
   scheme: SCHEME,
   tls: TLS_ENABLED,
@@ -305,22 +371,37 @@ const healthPayload = () => ({
   search: DEEPSEEK_KEY !== null,
   searchUpstream: DEEPSEEK_SEARCH_URL,
   searchKeySource: loadedDeepSeekKey?.source ?? null,
+  // 四家订阅各自有没有配 Key；网页版设置页用这个展示「中继开了哪几家」
+  providers: Object.fromEntries(PROVIDERS.map((provider) => [provider.id, provider.key !== null])),
 })
 
 // ─────────────────────────── /api/models ───────────────────────────
 
-/** 上游模型列表缓存：5 分钟内重复请求不再打上游 */
-let modelsCache = null // { expiresAt, status, body: Buffer, contentType }
+/** 上游模型列表缓存：按订阅分桶，5 分钟内重复请求不再打上游 */
+const modelsCache = new Map() // providerId -> { expiresAt, status, body: Buffer, contentType }
 
-const handleModels = async (res) => {
-  if (modelsCache && modelsCache.expiresAt > Date.now()) {
-    sendBuffer(res, modelsCache.status, modelsCache.body, modelsCache.contentType)
+const handleModels = async (req, res) => {
+  const provider = resolveProvider(req)
+  if (!provider) {
+    const header = req.headers[PROVIDER_HEADER]
+    const id = (typeof header === 'string' ? header : '').trim().toLowerCase()
+    sendJson(res, 400, providerUnknown(id))
+    return
+  }
+  if (provider.key === null) {
+    sendJson(res, 409, providerUnavailable(provider))
+    return
+  }
+  const cacheKey = provider.id
+  const cached = modelsCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) {
+    sendBuffer(res, cached.status, cached.body, cached.contentType)
     return
   }
   try {
-    const upstream = await fetch(`${UPSTREAM}/models`, {
+    const upstream = await fetch(`${provider.base}/models`, {
       method: 'GET',
-      headers: { authorization: `Bearer ${API_KEY}`, 'user-agent': RELAY_USER_AGENT },
+      headers: { authorization: `Bearer ${provider.key}`, 'user-agent': RELAY_USER_AGENT },
       signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
     })
     const body = Buffer.from(await upstream.arrayBuffer())
@@ -331,12 +412,12 @@ const handleModels = async (res) => {
       return
     }
     const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8'
-    modelsCache = { expiresAt: Date.now() + MODELS_CACHE_TTL, status: 200, body, contentType }
+    modelsCache.set(cacheKey, { expiresAt: Date.now() + MODELS_CACHE_TTL, status: 200, body, contentType })
     sendBuffer(res, 200, body, contentType)
   } catch (error) {
     sendJson(res, 502, {
       error: {
-        message: `无法访问上游 ${UPSTREAM}/models：${
+        message: `无法访问上游 ${provider.base}/models：${
           error instanceof Error ? error.message : String(error)
         }`,
       },
@@ -347,10 +428,22 @@ const handleModels = async (res) => {
 // ─────────────────────────── /api/chat/completions ───────────────────────────
 
 /**
- * 把请求体原样 POST 给上游 /chat/completions，并把响应字节直接写回浏览器。
+ * 把请求体原样 POST 给所选订阅的 /chat/completions，并把响应字节直接写回浏览器。
  * 流式响应不做整段缓冲：上游吐出多少就转发多少；客户端断开时 abort 上游请求。
+ * 只有 opencode 需要 x-opencode-session + 自定义 User-Agent，其它家只带 Bearer。
  */
 const handleChat = async (req, res) => {
+  const provider = resolveProvider(req)
+  if (!provider) {
+    const header = req.headers[PROVIDER_HEADER]
+    const id = (typeof header === 'string' ? header : '').trim().toLowerCase()
+    sendJson(res, 400, providerUnknown(id))
+    return
+  }
+  if (provider.key === null) {
+    sendJson(res, 409, providerUnavailable(provider))
+    return
+  }
   let body
   try {
     body = await readRequestBody(req)
@@ -372,16 +465,19 @@ const handleChat = async (req, res) => {
   res.on('close', abortUpstream)
 
   try {
-    const upstream = await fetch(`${UPSTREAM}/chat/completions`, {
+    const upstreamHeaders = {
+      'content-type': 'application/json',
+      authorization: `Bearer ${provider.key}`,
+      accept: 'text/event-stream',
+      'user-agent': RELAY_USER_AGENT,
+    }
+    // opencode go 必需：会话 id（详见 docs/RELAY.md）；其它家不需要
+    if (provider.sessionNeeded) {
+      upstreamHeaders['x-opencode-session'] = sessionForRequest(req)
+    }
+    const upstream = await fetch(`${provider.base}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${API_KEY}`,
-        accept: 'text/event-stream',
-        // opencode go 必需的两个头：会话 id + 自己的 User-Agent（详见 docs/RELAY.md）
-        'x-opencode-session': sessionForRequest(req),
-        'user-agent': RELAY_USER_AGENT,
-      },
+      headers: upstreamHeaders,
       body,
       signal: controller.signal,
     })
@@ -413,7 +509,7 @@ const handleChat = async (req, res) => {
     if (!res.headersSent) {
       sendJson(res, 502, {
         error: {
-          message: `无法访问上游 ${UPSTREAM}/chat/completions：${
+          message: `无法访问上游 ${provider.base}/chat/completions：${
             error instanceof Error ? error.message : String(error)
           }`,
         },
@@ -678,7 +774,7 @@ const handleRequest = async (req, res) => {
       methodNotAllowed(res, 'GET')
       return
     }
-    await handleModels(res)
+    await handleModels(req, res)
     return
   }
   // /api/chat 是 /api/chat/completions 的别名，两个都收
@@ -777,9 +873,15 @@ const printStartup = () => {
   console.log('')
   console.log('  卡片树手机版 · 本地中继')
   console.log('  ────────────────────────────────────────────')
-  console.log(`  API Key   : 已加载（来自 ${loadedKey.source}，长度 ${API_KEY.length}）`)
-  console.log(`  上游地址  : ${UPSTREAM}`)
-  console.log('  上游请求头: 自动注入 Authorization、x-opencode-session、User-Agent（浏览器不用管）')
+  console.log(`  订阅 Key  : ${configuredCount} / ${PROVIDERS.length} 家已配置（网页端「设置 → 订阅与模型」切换）`)
+  for (const provider of PROVIDERS) {
+    if (provider.key === null) {
+      console.log(`  ✗ ${provider.label.padEnd(10)}: 未配置（可设环境变量 ${provider.envKey}，或写进 credentials）`)
+    } else {
+      console.log(`  ✓ ${provider.label.padEnd(10)}: 已配置（来自 ${provider.keySource}，上游 ${provider.base}）`)
+    }
+  }
+  console.log('  上游请求头: 自动注入 Authorization；opencode go 另补 x-opencode-session、User-Agent')
   console.log(
     DEEPSEEK_KEY === null
       ? '  联网搜索  : 未配置 DEEPSEEK_API_KEY（搜索开关会置灰，聊天不受影响）'

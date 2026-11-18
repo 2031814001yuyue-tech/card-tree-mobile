@@ -49,6 +49,8 @@ export type StreamEvent =
   | { type: 'done'; finishReason: string | null }
 
 export type ChatRequest = {
+  /** 走哪家订阅上游；中继/APK 按它路由（缺省 = opencode，兼容旧调用） */
+  provider?: string
   model: string
   messages: ChatMessage[]
   /** 推理强度：opencode go 支持 "high" 之类的档位，走 body.reasoning_effort */

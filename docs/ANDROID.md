@@ -1,4 +1,4 @@
-# Android APK 说明（card-tree-mobile 0.3.4）
+# Android APK 说明（card-tree-mobile 0.3.5）
 
 这份文档说明 `android/` 壳子是怎么工作的、怎么构建、以及验证到了哪一步。
 产品层面的安装步骤看 [`../README.md`](../README.md) 的「Android APK」一节。
@@ -15,20 +15,22 @@
 
 ```
 MainActivity.onCreate()
-  ├─ KeyVault(this)                        对话 Key（Android Keystore AES-256-GCM）
-  ├─ KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")   搜索 Key（另一把，同样加密）
+  ├─ KeyVault(this)                        opencode go 对话 Key（Android Keystore AES-256-GCM）
+  ├─ KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")   DeepSeek 官方对话 Key ＝搜索 Key
+  ├─ KeyVault(this, "zai_api_key", "card_tree_zai_key_v1")              智谱 Coding Key
+  ├─ KeyVault(this, "kimi_api_key", "card_tree_kimi_key_v1")            Kimi Coding Key
   ├─ WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION)              热更新器（见下节）
-  ├─ LocalServer(assets, vault::get, searchVault::get, sessionId, "0.3.4", preferredPort)
-  │    ├─ ServerSocket(随机端口, 50, 127.0.0.1)   只监听本机回环；端口固定后复用
+  ├─ LocalServer(assets, chatKeys, searchVault::get, sessionId, "0.3.5", preferredPort)
+  │    ├─ ServerSocket(固定端口, 50, 127.0.0.1)   只监听本机回环；端口固定后复用
   │    └─ 后台线程 acceptLoop()             每连接一个线程（daemon 线程池）
   └─ WebView.loadUrl("http://127.0.0.1:<port>/")
         │
         ├─ GET /                     → files/web/index.html（热更新版）→ 没有再回 assets/www
         ├─ GET /static/js/main.*.js  → 静态资源（Cache-Control: no-store）
-        ├─ GET /api/health           → {"ok":true,"mode":"android",...}
-        ├─ GET /api/models           → 反代 opencode go，5 分钟缓存
-        ├─ POST /api/chat/completions→ 反代并逐块透传 SSE
-        │                               （注入 Authorization / x-opencode-session / User-Agent）
+        ├─ GET /api/health           → {"ok":true,"mode":"android",...,"providers":{...}}
+        ├─ GET /api/models           → 按 x-card-tree-provider 路由四家上游，每家 5 分钟缓存
+        ├─ POST /api/chat/completions→ 按头路由四家并逐块透传 SSE
+        │                               （一律注入 Authorization；opencode 另补 x-opencode-session / UA）
         └─ POST /api/deepseek/search → 反代 DeepSeek Search API（没有搜索 Key 时返回 409）
 
 （启动 4 秒后 web.postDelayed → checkWebUpdateSilently()：后台查一次 GitHub Releases，
@@ -67,9 +69,26 @@ MainActivity.onCreate()
 ```
 
 - 网页侧**两种返回结构都认**：中继版返回 `{sources:[…]}`，APK 直连 DeepSeek 返回 `{results:[…]}`（`services/search.ts` 里优先读 `sources`，没有就读 `results`，`publishedAt` 兼容 `date`）
-- 搜索 Key 是**第二把**：`KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")`，和对话 Key 用不同的 SharedPreferences 字段与不同的 Keystore alias，互不影响；「设置 → 联网搜索」里单独保存 / 清除
+- 搜索 Key 是**独立一把**：`KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")`——0.3.5 起它同时是「DeepSeek 官方」订阅的对话 Key（同 field / alias，「设置 → 联网搜索」与「设置 → 连接（DeepSeek 官方时）」看到的就是同一把）；其它订阅的对话 Key 各用各的 field，互不影响
 - 搜到的摘要会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息，并要求模型标 `[1][2]`；来源随卡片存 IndexedDB（`card.search`），所以离线回看时来源列表还在
 - 搜索失败 / 没配 Key 都不会阻塞提问：前端 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
+
+### 多订阅（四家上游）在 APK 里怎么走
+
+`LocalServer` 里有一张静态 `PROVIDERS` 表（id / label / base / sessionNeeded），按请求头 `x-card-tree-provider` 路由（缺省 `opencode`，trim + 小写后匹配，未知 id → 400 `provider_unknown`）：
+
+| id | 上游 | sessionNeeded | Key（SharedPreferences 字段 / Keystore alias） |
+| --- | --- | --- | --- |
+| opencode | `https://opencode.ai/zen/go/v1` | 是（补 `x-opencode-session` + UA） | `api_key` / `card_tree_api_key_v1` |
+| zai | `https://open.bigmodel.cn/api/coding/paas/v4` | 否 | `zai_api_key` / `card_tree_zai_key_v1` |
+| kimi | `https://api.kimi.com/coding/v1` | 否 | `kimi_api_key` / `card_tree_kimi_key_v1` |
+| deepseek | `https://api.deepseek.com` | 否 | `deepseek_api_key` / `card_tree_deepseek_key_v1`（与搜索共用） |
+
+- 构造函数签名：`LocalServer(AssetSource, Map<String,KeyProvider> chatKeys, KeyProvider searchKeys, String sessionId, String version, int preferredPort)`；`MainActivity.chatKeys(map)` 把 `Map<String,KeyVault>` 转成 `Map<String,KeyProvider>`（跳过没初始化的项）
+- `handleModels` / `handleChat` 都先 `providerId(headers)` → `findProvider`；没配那家的 Key → 409 `provider_unavailable`（中文提示带 label）
+- models 缓存按 provider 分桶（`ConcurrentHashMap<String, ModelsCache>`，TTL 仍是 5 分钟）；`health()` 返回 `"providers":{opencode:true,…}` 供网页显示「服务端已配置 Key 的订阅」
+- `NativeBridge` 构造 `(MainActivity, KeyVault, Map<String,KeyVault> providerVaults, WebUpdater)`；新桥方法 `hasProviderKey(id)` / `saveProviderKey(id,key)`（成功后 `reloadModelsLater()`）/ `clearProviderKey(id)`；旧的 `hasKey/saveKey/clearKey` 保留、作用于 opencode 那把——**WebView 桥方法不能重载，所以按名字分发**
+- 网页侧兼容旧壳：`nativeSupportsProviders()` 检测桥上有没有 `hasProviderKey`；0.3.4 及更早的壳没有 → 多订阅 UI 整体隐藏（防止热更新把新网页层推给旧壳、用户填了 Key 却存不上）
 
 ### 网页层热更新在 APK 里怎么走
 
@@ -109,16 +128,16 @@ MainActivity 的 AssetSource：
 | `LocalServer.java` | 本地 HTTP/1.1 服务（纯 JDK，不依赖 Android）：静态资源 + `/api/models` `/api/chat/completions`（SSE 逐块透传）+ `/api/deepseek/search`（搜索转发） |
 | `KeyVault.java` | API Key 的加解密：Android Keystore 里生成不可导出的 AES-256-GCM 密钥，密文（iv + ciphertext）Base64 存 SharedPreferences；构造器带 `field` / `alias`，对话 Key 与搜索 Key 各存一把 |
 | `WebUpdater.java` | 热更新器（纯 JDK）：查 GitHub Releases → 下载 → sha256 校验 → 解压 staging → 原子切换 `files/web` → 写版本号；内嵌一个小型 JSON 解析器只读 Releases 响应 |
-| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / version / setChrome / saveBackup / saveAutoBackup / toast / getWebVersion / checkWebUpdate / installWebUpdate` |
+| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / hasProviderKey / saveProviderKey / clearProviderKey / version / setChrome / saveBackup / saveAutoBackup / toast / getWebVersion / checkWebUpdate / installWebUpdate` |
 | `AssetSource.java` | 一行接口，把 `assets/www/<path>` 抽象成 `InputStream`（方便在桌面 JVM 上测 `LocalServer`） |
 | `Mime.java` | 扩展名 → Content-Type |
 
 网页侧对应新增 `app/src/services/native.ts`：
 
-- `isNativeApp()` / `nativeBridge()` / `nativeHasKey()` / `saveNativeKey()` / `clearNativeKey()` / `nativeHasSearchKey()` / `saveNativeSearchKey()` / `clearNativeSearchKey()` / `nativeVersion()` / `saveNativeBackup()` / `saveNativeAutoBackup()`
+- `isNativeApp()` / `nativeBridge()` / `nativeHasKey()` / `saveNativeKey()` / `clearNativeKey()` / `nativeHasSearchKey()` / `saveNativeSearchKey()` / `clearNativeSearchKey()` / `nativeHasProviderKey()` / `saveNativeProviderKey()` / `clearNativeProviderKey()` / `nativeSupportsProviders()` / `nativeVersion()` / `saveNativeBackup()` / `saveNativeAutoBackup()`
 - `App.tsx` 在 `window.__cardTreeBack` 上挂返回键处理（先关浮层 → 再回树 → 都没有才退出），在 `window.__cardTreeKeyChanged` 上挂模型重拉
-- 没有 Key 时弹一次「先连上 opencode go」的 Sheet；「设置 → 连接」里可以替换 / 清除 Key
-- `theme.ts` 把纸面背景色同步给原生状态栏 / 导航栏
+- 没有 Key 时弹一次「先连上 <当前订阅>」的 Sheet；「设置 → 连接」跟随当前订阅显示 / 替换 / 清除那家的 Key
+- `theme.ts` 把纸面背景色同步给原生状态栏 / 导航栏（四种界面风格切换时也会跟着换）
 - `store.ts` 的「导出当前项目」在 APK 里改走原生保存到「下载/CardTree」
 
 ## 构建
@@ -144,13 +163,13 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 ### 版本号
 
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
-`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.4'` 的兜底值、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
+`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.5'` 的兜底值、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
 ## 已做的验证
 
 | 项目 | 结果 |
 | --- | --- |
-| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='7' versionName='0.3.4'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
+| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='8' versionName='0.3.5'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
 | `apksigner verify` | release APK 由 `android/app/card-tree-release.jks` 签名（v2 方案），证书 DN `CN=CardTree Mobile` —— 不是 debug 证书 |
 | APK 内容 | 167 个条目，其中 156 个是 `assets/www/**`：`index.html`、`manifest.webmanifest`、`icon-180/192/512.png`、单个 hash 化的 `static/js/main.*.js` + `static/css/main.*.css` + KaTeX 字体 |
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
@@ -158,13 +177,14 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | 联网搜索端到端 | 390×844 视口点亮「联网搜索」提问「杭州今天天气怎么样？」：真实搜到 5 条来源、回答带 `[1]–[5]`、卡片底部来源列表可点；思考过程里能看到 5 条资料摘要（见 `docs/preview/25-search-toggle.png`、`26-search-sources.png`） |
 | 原生 UI 路径 | 用 CDP 注入一个假的 `window.CardTreeNative`，在 390×844 视口截了「首次启动填 Key」和「设置 → 连接」两张图（见 `docs/preview/14-onboarding.png`、`15-settings-connect.png`） |
 | **WebUpdater 全链路** | **真实 GitHub API**：同版本（0.3.4）check → `null`（无更新）；低版本（0.0.1）check → 正确拿到 `web-v0.3.4`（tag/size/notes 齐全）。**本地服务器扮演 GitHub 完整安装**：check → 下载 → sha256 校验 → 解压 156 个文件（`index.html` 1450 B、`static/css/main.*.css` 73530 B 都能从 `files/web/` 读出）→ 原子切换 → `currentWebVersion()` 读回 `9.9.9`；`../` 目录穿越被拒绝；**sha256 不一致**时抛「更新包校验失败（sha256 不一致），已取消」且 `files/web` 不被创建、版本仍是壳版本 |
-| 发布脚本 | `node scripts/publish-web.mjs` 发布 `web-v0.3.4`（web.zip 1.78 MB、156 个条目、正斜杠路径），`jar tf` 验证 zip 结构正确；gh 前置检查（auth / tag 不存在）都过 |
+| 发布脚本 | `node scripts/publish-web.mjs` 发布 `web-v0.3.5`（web.zip 1.78 MB、156 个条目、正斜杠路径），`jar tf` 验证 zip 结构正确；gh 前置检查（auth / tag 不存在）都过 |
+| 四家订阅路由 | `GET /api/models` 带 `x-card-tree-provider` 四家全 200；kimi / deepseek / opencode 流式对话真跑通（31 / 17 / 8 chunks）；智谱返回 429「套餐已到期」原样透传；未知头 400 `provider_unknown`；「设置 → 连接」随当前订阅显示（CDP 假桥注入验证，见 `docs/preview/29-providers.png`） |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 
 ## 安全说明
 
-- Key 只在本机：Android Keystore 生成不可导出密钥 → AES-256-GCM 加密 → Base64 存 SharedPreferences。**两把 Key 两个 alias**：对话 Key 存 `card_tree_mobile/api_key`（alias `card_tree_api_key_v1`），搜索 Key 存 `card_tree_mobile/deepseek_api_key`（alias `card_tree_deepseek_key_v1`）。Keystore 密钥不进备份，`android:allowBackup="false"`。
+- Key 只在本机：Android Keystore 生成不可导出密钥 → AES-256-GCM 加密 → Base64 存 SharedPreferences。**每家订阅一个字段一个 alias**：opencode 存 `card_tree_mobile/api_key`（alias `card_tree_api_key_v1`）、智谱 `zai_api_key`（`card_tree_zai_key_v1`）、Kimi `kimi_api_key`（`card_tree_kimi_key_v1`）、DeepSeek `deepseek_api_key`（`card_tree_deepseek_key_v1`，同时是搜索 Key）。Keystore 密钥不进备份，`android:allowBackup="false"`。
 - 本地服务只绑 `127.0.0.1`：同一 Wi-Fi 的其它设备连不上；不需要网络权限以外的任何权限。
 - 明文 HTTP 只对 `127.0.0.1` / `localhost` 放开（`res/xml/network_security_config.xml`），其它域名一律禁明文；上游是 https。
 - `x-opencode-session` 用 `ANDROID_ID` 派生并存在 SharedPreferences（`session_id`），opencode go 要求每个客户端带一个稳定值，缺了会 400 `MissingSessionID`。
@@ -173,7 +193,8 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 
 - **装不上 / 提示未知来源**：APK 用的是自己生成的 release 证书（不是 Play 商店签名），系统仍会提示未知来源，允许「安装未知应用」即可。**`android/app/card-tree-release.jks` 与 `android/keystore.properties` 必须保留**：以后发新版本要用同一把钥匙签名，否则手机会当成另一个 App，装不上去也接不上数据。
 - **提示「本地服务启动失败」**：端口被占用或 assets 里没有网页（构建时 `pnpm build` 没跑）。重装即可。
-- **一直转圈 / 模型列表空**：先确认设置里的 Key 状态是「已配置」；`/api/models` 返回 401 就是没 Key，返回 502 一般是上游网络问题。
+- **一直转圈 / 模型列表空**：先确认设置里当前订阅的 Key 状态是「已配置」；`/api/models` 返回 401 就是没 Key / Key 失效，返回 409 是中继或 APK 没配那家 Key，返回 502 一般是上游网络问题。智谱返回 429「套餐已到期」是订阅过期，续订即恢复。
+- **切换订阅后模型列表没变**：模型按订阅分开缓存（5 分钟），点一下「刷新模型」即可；每家记忆的模型 / 推理强度切回来会自动恢复。
 - **导出备份找不到文件**：Android 10+ 在「下载/CardTree」下；更老的系统在 `Android/data/com.cardtree.mobile/files/Documents/`。
 - **联网搜索点了没反应 / 显示「联网（未开通）」**：说明还没配第二把 Key。到「设置 → 联网搜索」粘贴一把 DeepSeek API Key（可以在 `platform.deepseek.com` 创建），保存后按钮就可以点亮了；搜索接口返回 409 也是同一个原因。
 - **联网搜索报错**：卡片上不会显示搜索错误（不阻塞回答），只会 toast 一句「联网搜索失败，这次先按不联网回答」；`/api/deepseek/search` 返回 502 多半是 Key 没有 Search API 权限或网络不通。

@@ -27,6 +27,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -36,7 +38,7 @@ import java.util.UUID;
  */
 public final class MainActivity extends Activity {
 
-    public static final String APP_VERSION = "0.3.4";
+    public static final String APP_VERSION = "0.3.5";
 
     /** 网页层热更新从这个仓库的 GitHub Releases 拿（tag 形如 web-v0.3.5，附带 web.zip + 哈希）。 */
     private static final String UPDATE_REPO = "2031814001yuyue-tech/card-tree-mobile";
@@ -49,8 +51,12 @@ public final class MainActivity extends Activity {
     private WebView web;
     private LocalServer server;
     private KeyVault vault;
-    /** 联网搜索用的 DeepSeek Key（和对话 Key 分开存） */
+    /** 联网搜索用的 DeepSeek Key（和对话 Key 分开存，同时就是 deepseek 订阅那一把） */
     private KeyVault searchVault;
+    /** 智谱 Coding 订阅的 Key */
+    private KeyVault zaiVault;
+    /** Kimi Coding 订阅的 Key */
+    private KeyVault kimiVault;
     /** 网页层热更新：检查 / 下载 GitHub Releases 上的新网页包 */
     private WebUpdater updater;
     private ValueCallback<Uri[]> pendingFiles;
@@ -61,13 +67,22 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         vault = new KeyVault(this);
         searchVault = new KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1");
+        zaiVault = new KeyVault(this, "zai_api_key", "card_tree_zai_key_v1");
+        kimiVault = new KeyVault(this, "kimi_api_key", "card_tree_kimi_key_v1");
+        // 四家订阅各自的 Key（HashMap 而不是 Map.of，免得哪天混进空值直接 NPE）；
+        // deepseek 订阅与联网搜索共用同一把 deepseek_api_key
+        Map<String, KeyVault> providerVaults = new HashMap<>();
+        providerVaults.put("opencode", vault);
+        providerVaults.put("zai", zaiVault);
+        providerVaults.put("kimi", kimiVault);
+        providerVaults.put("deepseek", searchVault);
+        updater = new WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION);
         web = new WebView(this);
         web.setBackgroundColor(getResources().getColor(R.color.paper, getTheme()));
-        configure(web);
+        configure(web, providerVaults);
         setContentView(web);
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         int preferredPort = prefs.getInt(PORT_FIELD, 0);
-        updater = new WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION);
         try {
             AssetSource assets = path -> {
                 // 热更新过的网页层优先：先读 files/web/，读不到再回 APK 内置的 assets/www
@@ -81,8 +96,8 @@ public final class MainActivity extends Activity {
                     return null;
                 }
             };
-            server = new LocalServer(assets, vault::get, searchVault::get, sessionId(),
-                    APP_VERSION, preferredPort);
+            server = new LocalServer(assets, chatKeys(providerVaults), searchVault::get,
+                    sessionId(), APP_VERSION, preferredPort);
             // 启动成功后把实际端口写回：首次随机，之后固定，WebView 的源不会变
             prefs.edit().putInt(PORT_FIELD, server.port()).apply();
             web.loadUrl("http://127.0.0.1:" + server.port() + "/");
@@ -94,7 +109,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void configure(WebView view) {
+    private void configure(WebView view, Map<String, KeyVault> providerVaults) {
         WebSettings settings = view.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -108,7 +123,8 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setUserAgentString(settings.getUserAgentString() + " CardTree/" + APP_VERSION);
-        view.addJavascriptInterface(new NativeBridge(this, vault, searchVault, updater), "CardTreeNative");
+        view.addJavascriptInterface(
+                new NativeBridge(this, vault, providerVaults, updater), "CardTreeNative");
         view.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) {
@@ -137,6 +153,19 @@ public final class MainActivity extends Activity {
                 return true;
             }
         });
+    }
+
+    /** LocalServer 要的是「id → 取 Key 的函数」：把四把 vault 换成四个 KeyProvider。 */
+    private static Map<String, LocalServer.KeyProvider> chatKeys(
+            Map<String, KeyVault> providerVaults) {
+        Map<String, LocalServer.KeyProvider> chatKeys = new HashMap<>();
+        for (Map.Entry<String, KeyVault> entry : providerVaults.entrySet()) {
+            KeyVault value = entry.getValue();
+            if (value != null) {
+                chatKeys.put(entry.getKey(), value::get);
+            }
+        }
+        return chatKeys;
     }
 
     private boolean openExternal(String url) {

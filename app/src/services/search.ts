@@ -41,18 +41,39 @@ const readErrorMessage = async (response: Response): Promise<string> => {
   return text.trim() || `HTTP ${response.status}`
 }
 
-/** 查一下服务端有没有配 DeepSeek Key（健康检查里的 `search` 字段） */
-export const fetchSearchAvailability = async (apiBase: string): Promise<boolean> => {
+/** /api/health 里我们关心的字段：联网搜索有没有 Key、各家订阅有没有 Key */
+export type RelayInfo = {
+  search: boolean
+  providers: Record<string, boolean> | null
+}
+
+/** 查一下服务端状态：有没有配 DeepSeek 搜索 Key、各家订阅配了哪几家 */
+export const fetchRelayInfo = async (apiBase: string): Promise<RelayInfo | null> => {
   try {
     const response = await fetch(`${normalizeApiBase(apiBase)}/health`)
     if (!response.ok) {
-      return false
+      return null
     }
-    const payload = (await response.json()) as { search?: unknown }
-    return payload?.search === true
+    const payload = (await response.json()) as { search?: unknown; providers?: unknown }
+    const providers =
+      typeof payload?.providers === 'object' && payload.providers !== null && !Array.isArray(payload.providers)
+        ? Object.fromEntries(
+            Object.entries(payload.providers as Record<string, unknown>).map(([key, value]) => [
+              key,
+              value === true,
+            ]),
+          )
+        : null
+    return { search: payload?.search === true, providers }
   } catch {
-    return false
+    return null
   }
+}
+
+/** 查一下服务端有没有配 DeepSeek Key（健康检查里的 `search` 字段） */
+export const fetchSearchAvailability = async (apiBase: string): Promise<boolean> => {
+  const info = await fetchRelayInfo(apiBase)
+  return info?.search === true
 }
 
 /**

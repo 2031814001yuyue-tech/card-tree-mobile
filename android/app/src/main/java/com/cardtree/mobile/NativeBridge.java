@@ -18,30 +18,38 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 暴露给网页的 {@code window.CardTreeNative}：负责 API Key 的存取、导出备份、状态栏配色等
- * 浏览器里做不到的事。方法都必须是同步返回的基本类型 / 字符串。
+ * 暴露给网页的 {@code window.CardTreeNative}：负责 API Key 的存取（opencode 那把走
+ * hasKey/saveKey/clearKey，四家订阅走 hasProviderKey/saveProviderKey/clearProviderKey）、
+ * 导出备份、状态栏配色等浏览器里做不到的事。方法都必须是同步返回的基本类型 / 字符串。
  */
 public final class NativeBridge {
     private static final int MAX_AUTO_BACKUPS = 30;
     private static final String AUTO_BACKUP_DIR = "CardTree/backups";
 
     private final MainActivity activity;
+    /** opencode 用的对话 Key（旧网页层的 hasKey/saveKey/clearKey 作用在这上面） */
     private final KeyVault vault;
-    /** 联网搜索用的第二把 Key（DeepSeek），和对话 Key 分开存 */
+    /** 四家订阅各自的 KeyVault（id → vault）；deepseek 与联网搜索共用同一把 */
+    private final Map<String, KeyVault> providerVaults;
+    /** 联网搜索用的 DeepSeek Key（就是 providerVaults 里 "deepseek" 那一把） */
     private final KeyVault searchVault;
     /** 网页层热更新 */
     private final WebUpdater updater;
     /** 一次只允许一个更新任务在跑 */
     private final AtomicBoolean installing = new AtomicBoolean(false);
 
-    NativeBridge(MainActivity activity, KeyVault vault, KeyVault searchVault, WebUpdater updater) {
+    NativeBridge(MainActivity activity, KeyVault vault, Map<String, KeyVault> providerVaults,
+            WebUpdater updater) {
         this.activity = activity;
         this.vault = vault;
-        this.searchVault = searchVault;
+        this.providerVaults = providerVaults == null ? new HashMap<>() : providerVaults;
+        this.searchVault = this.providerVaults.get("deepseek");
         this.updater = updater;
     }
 
@@ -66,17 +74,59 @@ public final class NativeBridge {
 
     @JavascriptInterface
     public boolean hasSearchKey() {
-        return searchVault.hasKey();
+        return searchVault != null && searchVault.hasKey();
     }
 
     @JavascriptInterface
     public boolean saveSearchKey(String key) {
-        return searchVault.save(key);
+        return searchVault != null && searchVault.save(key);
     }
 
     @JavascriptInterface
     public void clearSearchKey() {
-        searchVault.clear();
+        if (searchVault != null) {
+            searchVault.clear();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 四家订阅的 Key（新网页层用）
+
+    /** 某家订阅有没有配 Key；未知 id 一律返回 false。 */
+    @JavascriptInterface
+    public boolean hasProviderKey(String provider) {
+        KeyVault target = vaultOf(provider);
+        return target != null && target.hasKey();
+    }
+
+    /** 保存某家订阅的 Key；未知 id 或空 Key 返回 false，成功后让网页刷新模型列表。 */
+    @JavascriptInterface
+    public boolean saveProviderKey(String provider, String key) {
+        KeyVault target = vaultOf(provider);
+        if (target == null) {
+            return false;
+        }
+        boolean saved = target.save(key);
+        if (saved) {
+            activity.reloadModelsLater();
+        }
+        return saved;
+    }
+
+    @JavascriptInterface
+    public void clearProviderKey(String provider) {
+        KeyVault target = vaultOf(provider);
+        if (target != null) {
+            target.clear();
+        }
+    }
+
+    /** id 大小写 / 首尾空格宽容处理；查不到（未知 id）返回 null。 */
+    private KeyVault vaultOf(String provider) {
+        if (provider == null) {
+            return null;
+        }
+        return providerVaults.get(provider.trim().toLowerCase(Locale.ROOT));
     }
 
     @JavascriptInterface

@@ -350,3 +350,43 @@
   font-size: 13.5px;
   line-height: 1.7;
 }
+
+/* 分支折叠：一张卡下面长出去的部分可以收起来，大树也能一眼扫完 */
+.fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 5px 0 0 20px;
+  padding: 3px 9px 3px 7px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease;
+}
+
+.fold:active {
+  background: var(--ct-surface-sunken);
+}
+
+.foldIcon,
+.foldIconOpen {
+  display: inline-flex;
+  align-items: center;
+}
+
+.foldIcon svg,
+.foldIconOpen svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* 收起时箭头朝右（ › ），展开时转成朝下 */
+.foldIconOpen {
+  transform: rotate(90deg);
+}

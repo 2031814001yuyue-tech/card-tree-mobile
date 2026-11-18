@@ -260,6 +260,7 @@ export const useStore = create<Store>((set, get) => {
     const finalAnswer = () => prefix + answer
     try {
       for await (const event of streamChat(normalizeApiBase(settings.apiBase), {
+        provider: settings.provider,
         model: settings.model,
         reasoningEffort: settings.reasoningEffort,
         messages: requestMessages,
@@ -350,14 +351,15 @@ export const useStore = create<Store>((set, get) => {
     loadModels: async () => {
       set({ modelsLoading: true, modelsError: null })
       try {
-        const models = await fetchModels(normalizeApiBase(useSettings.getState().apiBase))
+        const settings = useSettings.getState()
+        const models = await fetchModels(normalizeApiBase(settings.apiBase), settings.provider)
         set({ models, modelsLoading: false })
       } catch (error) {
         const isAuth = error instanceof ApiError && (error.status === 401 || error.kind === 'auth')
         set({
           modelsLoading: false,
           modelsError: isAuth
-            ? 'API Key 无效或缺失（401）：APK 里到「设置 → 连接」重新粘贴；网页版请检查电脑上中继的 OPENCODE_GO_API_KEY 后重启'
+            ? '当前订阅的 API Key 无效或缺失：APK 里到「设置 → 连接」重新粘贴；网页版请检查电脑中继里这家的 API Key 后重启'
             : error instanceof Error
               ? error.message
               : '获取模型列表失败',
