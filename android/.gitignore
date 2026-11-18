@@ -1,0 +1,12 @@
+# Gradle / Android 构建产物
+.gradle/
+build/
+local.properties
+captures/
+
+# 构建时从 ../app/dist 复制进来的网页，不入库
+app/src/main/assets/www/
+
+# release signing credentials (keystore + password) - never commit
+keystore.properties
+*.jks

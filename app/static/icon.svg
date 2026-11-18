@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="卡片树">
+  <rect width="512" height="512" rx="112" fill="#4D6BFE" />
+  <!-- 主干：顶部卡片向下延伸，到分叉点分成左右两支 -->
+  <path d="M256 200V284" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" />
+  <path d="M256 284L144 316M256 284L368 316" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" />
+  <!-- 三张卡片节点 -->
+  <rect x="212" y="140" width="88" height="60" rx="18" fill="#FFFFFF" />
+  <rect x="100" y="316" width="88" height="60" rx="18" fill="#FFFFFF" />
+  <rect x="324" y="316" width="88" height="60" rx="18" fill="#FFFFFF" />
+</svg>

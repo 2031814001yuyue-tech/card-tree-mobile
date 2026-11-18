@@ -1,0 +1,162 @@
+.mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.35);
+  animation: fade-in 160ms var(--ds-ease-in-out, ease);
+}
+
+.panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(84vw, 320px);
+  display: flex;
+  flex-direction: column;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: var(--ct-surface);
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.14);
+  animation: slide-in 220ms var(--ds-ease-in-out, ease);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 12px 8px;
+}
+
+.brand {
+  color: var(--ct-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.newButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 4px 12px;
+  padding: 11px;
+  border: 1px dashed var(--ct-line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ct-ink-soft);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+}
+
+.item:hover {
+  background: var(--ct-surface-sunken);
+}
+
+.itemActive {
+  background: var(--ct-blue-soft);
+}
+
+.itemActive .itemTitle {
+  color: var(--ct-blue);
+  font-weight: 600;
+}
+
+.itemMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 8px 9px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.itemTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ct-ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.itemMeta {
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
+
+.itemDelete {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.foot {
+  padding: 10px 4px 4px;
+  border-top: 1px solid var(--ct-line);
+}
+
+.footButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ct-ink-soft);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.footHint {
+  margin: 6px 8px 0;
+  color: var(--ct-ink-faint);
+  font-size: 11px;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0.7;
+  }
+}

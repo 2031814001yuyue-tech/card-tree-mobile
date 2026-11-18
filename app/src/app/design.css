@@ -1,0 +1,85 @@
+/*
+ * 卡片树的设计层。
+ *
+ * 底座是 DeepSeek 的一整套 --dsw-* 控件 token，这里在其上加一层属于产品自己的语气：
+ * 纸面 + 墨色 + 发丝线，一处「生长绿」表示真的长出了新内容，蓝色只做交互强调。
+ * 结构上的主角是「生长线」——树视图里的竖线把卡片串起来，卡片详情里追问也挂在同一条线上。
+ */
+
+:root {
+  /* 纸面 */
+  --ct-paper: #f4f5f9;
+  --ct-surface: #ffffff;
+  --ct-surface-sunken: #ebedf3;
+  /* 墨色：正文 / 次级 / 注脚，三级足够，不再多 */
+  --ct-ink: #191c23;
+  --ct-ink-soft: #5c6273;
+  --ct-ink-faint: #8a90a0;
+  /* 线与影 */
+  --ct-line: #e3e6ee;
+  --ct-line-strong: #d2d7e3;
+  --ct-thread: #c7cddd;
+  /* 生长线：比普通线再实一点，让树的骨架看得见 */
+  --ct-branch: #c3cbdc;
+  --ct-card-shadow: 0 1px 2px rgba(19, 24, 40, 0.04), 0 12px 24px -22px rgba(19, 24, 40, 0.35);
+  /* 强调：品牌蓝做交互，生长绿只给「完成/新枝」，琥珀给「重答」 */
+  --ct-blue: #4d6bfe;
+  --ct-blue-soft: rgba(77, 107, 254, 0.1);
+  --ct-grow: #2e9e6e;
+  --ct-grow-soft: rgba(46, 158, 110, 0.12);
+  --ct-amber: #b0730f;
+  --ct-danger: #cf4459;
+  /* 排版 */
+  --ct-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
+  --ct-radius-card: 18px;
+  /* 动效：只用一个缓出曲线，克制 */
+  --ct-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* 纸的纤维感：极淡的一层噪点，只铺在纸面上 */
+  --ct-grain: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='180'%3E%3Cfilter%20id='g'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.9'%20numOctaves='2'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20type='saturate'%20values='0'/%3E%3C/filter%3E%3Crect%20width='180'%20height='180'%20filter='url(%23g)'%20opacity='0.055'/%3E%3C/svg%3E");
+}
+
+body[data-ds-dark-theme] {
+  --ct-paper: #101114;
+  --ct-surface: #191a1f;
+  --ct-surface-sunken: #23252c;
+  --ct-ink: #ecedf3;
+  --ct-ink-soft: #a4aaba;
+  --ct-ink-faint: #717788;
+  --ct-line: #2a2d36;
+  --ct-line-strong: #3a3e49;
+  --ct-thread: #3c4150;
+  --ct-branch: #454b5a;
+  --ct-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --ct-blue: #6b85ff;
+  --ct-blue-soft: rgba(107, 133, 255, 0.16);
+  --ct-grow: #46b884;
+  --ct-grow-soft: rgba(70, 184, 132, 0.15);
+  --ct-amber: #d8a442;
+  --ct-danger: #f0736f;
+  /* 深色纸面用白色纤维，才不会糊成一团黑 */
+  --ct-grain: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='180'%3E%3Cfilter%20id='g'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.9'%20numOctaves='2'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20type='matrix'%20values='0%200%200%200%201%200%200%200%200%201%200%200%200%200%201%200%200%200%200.9%200'/%3E%3C/filter%3E%3Crect%20width='180'%20height='180'%20filter='url(%23g)'%20opacity='0.045'/%3E%3C/svg%3E");
+}
+
+/* 画布就是纸面：body 背景同时驱动浏览器主题色（theme.ts 会读它） */
+body {
+  background-color: var(--ct-paper);
+  background-image: var(--ct-grain);
+  background-size: 180px 180px;
+  color: var(--ct-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro SC', 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans',
+    'Segoe UI Variable', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+/* 动效底线：系统要求减少动画时，全部收掉 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

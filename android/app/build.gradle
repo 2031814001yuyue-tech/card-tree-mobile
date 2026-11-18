@@ -1,0 +1,87 @@
+plugins {
+    id 'com.android.application'
+}
+
+def webDist = rootProject.file('../app/dist')
+
+// release 签名材料不入库；文件缺失时保持空配置，保证没有 keystore 的机器 assembleDebug 也不挂
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+def releaseStoreFile = null
+def releaseStorePassword = null
+def releaseKeyAlias = null
+def releaseKeyPassword = null
+if (hasReleaseKeystore) {
+    def keystoreProperties = new Properties()
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    releaseStoreFile = rootProject.file(keystoreProperties.getProperty('storeFile'))
+    releaseStorePassword = keystoreProperties.getProperty('storePassword')
+    releaseKeyAlias = keystoreProperties.getProperty('keyAlias')
+    releaseKeyPassword = keystoreProperties.getProperty('keyPassword')
+}
+
+android {
+    namespace 'com.cardtree.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.cardtree.mobile'
+        minSdk 26
+        targetSdk 34
+        versionCode 7
+        versionName '0.3.4'
+    }
+
+    // 只在 arm64 / armv7 上体积更小：网页资源占大头，dex 很小，这里不用拆
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/*.kotlin_module']
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile releaseStoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+def webTargetDir = layout.projectDirectory.dir('src/main/assets/www')
+
+tasks.register('copyWebAssets', Copy) {
+    doFirst {
+        if (!webDist.exists()) {
+            throw new GradleException('missing ' + webDist + ' - run "pnpm build" in the app directory first')
+        }
+        // 先清空，避免旧 hash 文件残留进 APK
+        delete webTargetDir
+    }
+    from webDist
+    into webTargetDir
+}
+
+tasks.named('preBuild').configure {
+    dependsOn 'copyWebAssets'
+}

@@ -1,0 +1,664 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  /* 手机上左右不留白：正文吃满屏宽，卡片是一张铺到屏幕两边的纸 */
+  padding: 18px 0 calc(28px + env(safe-area-inset-bottom));
+}
+
+/* ---- 索引卡：整张卡片就是一张纸，签从纸面上沿探出来 ---- */
+
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 18px 16px;
+  border-top: 1px solid var(--ct-line);
+  border-bottom: 1px solid var(--ct-line);
+  border-radius: 0;
+  background: var(--ct-surface);
+  box-shadow: var(--ct-card-shadow);
+  animation: sheet-in 300ms var(--ct-ease) both;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 签：像从纸面上沿探出来的一小截索引标签，左边打了一个穿绳孔 */
+.tab {
+  position: absolute;
+  top: -14px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 5px 8px;
+  border: 1px solid var(--ct-line);
+  border-bottom: none;
+  border-radius: 9px 9px 2px 2px;
+  background: var(--ct-paper);
+  box-shadow: 0 -1px 2px rgba(19, 24, 40, 0.03);
+  font-family: var(--ct-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  line-height: 15px;
+  color: var(--ct-ink-faint);
+}
+
+.tab::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ct-surface);
+  box-shadow: inset 0 0 0 1px var(--ct-line-strong);
+}
+
+.tabMode {
+  color: var(--ct-ink-soft);
+  font-weight: 600;
+}
+
+.tabMode[data-mode='child'] {
+  color: var(--ct-blue);
+}
+
+.tabMode[data-mode='diverge'] {
+  color: var(--ct-grow);
+}
+
+.tabMode[data-mode='branch'] {
+  color: var(--ct-amber);
+}
+
+.tabLevel {
+  color: var(--ct-ink-faint);
+  opacity: 0.85;
+}
+
+.question {
+  margin: 0;
+  color: var(--ct-ink);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+  white-space: pre-wrap;
+}
+
+.headMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--ct-ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.headMeta > span + span::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--ct-thread);
+}
+
+.headStatus[data-status='running'] {
+  color: var(--ct-blue);
+}
+
+.headStatus[data-status='error'] {
+  color: var(--ct-danger);
+}
+
+/* ---- 回答正文 ---- */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.78;
+}
+
+.thinking {
+  border-radius: 12px;
+  background: var(--ct-surface-sunken);
+  overflow: hidden;
+}
+
+.thinkingToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinkingCount {
+  margin-left: auto;
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  display: inline-flex;
+  flex: none;
+  transition: transform var(--ds-transition-duration, 160ms) var(--ds-ease-in-out, ease);
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.thinkingBody {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  color: var(--ct-ink-soft);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.typing {
+  display: flex;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ct-ink-faint);
+  animation: blink 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ct-danger) 8%, transparent);
+}
+
+.errorText {
+  margin: 0;
+  color: var(--ct-danger);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.partialBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--ct-line-strong);
+  border-radius: 12px;
+  background: var(--ct-surface-sunken);
+}
+
+.partialText {
+  margin: 0;
+  color: var(--ct-ink-soft);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.stats {
+  margin: 0;
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+/* ---- 操作行：图标 + 短词，窄屏自动折行 ---- */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ct-line);
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px 7px 8px;
+  border: 1px solid var(--ct-line);
+  border-radius: 10px;
+  background: var(--ct-surface);
+  color: var(--ct-ink-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.action:active {
+  background: var(--ct-surface-sunken);
+}
+
+.action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.actionIcon {
+  display: inline-flex;
+  opacity: 0.9;
+}
+
+.actionDanger {
+  color: var(--ct-danger);
+  border-color: color-mix(in srgb, var(--ct-danger) 28%, transparent);
+}
+
+/* ---- 分节标题：小标签 + 向右的细线 ---- */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 纸面外的分节（引用 / 追问 / 子卡片）留一点边距，跟纸面对齐 */
+  padding: 0 16px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ct-ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.sectionHead::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--ct-line);
+}
+
+.refList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.refChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ct-line);
+  border-radius: 999px;
+  background: var(--ct-surface);
+  overflow: hidden;
+}
+
+.refOpen {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 4px 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--ct-ink-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.refRemove {
+  padding: 4px 10px 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* ---- 追问：挂在同一条生长线上 ---- */
+
+.followUps {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.followUp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 16px;
+}
+
+.followUp::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 3px;
+  width: 1px;
+  background: var(--ct-thread);
+}
+
+.followUp::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ct-thread);
+  border-radius: 50%;
+  background: var(--ct-paper);
+}
+
+.followQuestion {
+  margin: 0;
+  color: var(--ct-ink);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  white-space: pre-wrap;
+}
+
+/* ---- 子卡片：这张卡片长出去的枝 ---- */
+
+.children {
+  display: flex;
+  flex-direction: column;
+}
+
+.child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 2px;
+  border: none;
+  border-bottom: 1px solid var(--ct-line);
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.child:last-child {
+  border-bottom: none;
+}
+
+.child:active {
+  opacity: 0.7;
+}
+
+.childMode {
+  flex: none;
+  color: var(--ct-ink-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.childMode[data-mode='child'] {
+  color: var(--ct-blue);
+}
+
+.childMode[data-mode='diverge'] {
+  color: var(--ct-grow);
+}
+
+.childMode[data-mode='branch'] {
+  color: var(--ct-amber);
+}
+
+.childText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ct-ink);
+  font-size: 13.5px;
+}
+
+.childArrow {
+  flex: none;
+  color: var(--ct-ink-faint);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ct-ink-faint);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+/* ── 附件：图片是纸面上的一张照片，文本文件是一个可展开的夹子 ── */
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fileImage {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid var(--ct-line);
+  border-radius: 12px;
+  background: var(--ct-surface-sunken);
+  object-fit: cover;
+}
+
+.fileBlock {
+  width: 100%;
+  border: 1px solid var(--ct-line);
+  border-radius: 12px;
+  background: var(--ct-surface-sunken);
+}
+
+.fileSummary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: var(--ct-ink-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.fileSummary::-webkit-details-marker {
+  display: none;
+}
+
+.fileIcon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--ct-surface);
+  color: var(--ct-ink-faint);
+}
+
+.fileName {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fileSize {
+  flex: none;
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10.5px;
+}
+
+.fileText {
+  max-height: 240px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-top: 1px solid var(--ct-line);
+  color: var(--ct-ink-soft);
+  font-family: var(--ct-font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 联网来源：回答下面的一小块，编号 + 标题 + 域名，点开去原文 */
+.sources {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ct-line);
+}
+
+.sourcesHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+
+.sourcesHead svg {
+  width: 13px;
+  height: 13px;
+}
+
+.sourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sourceItem {
+  min-width: 0;
+}
+
+.sourceLink {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 140ms ease;
+}
+
+.sourceLink:hover,
+.sourceLink:focus-visible {
+  background: var(--ct-surface-sunken);
+}
+
+.sourceIndex {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  border-radius: 5px;
+  background: var(--ct-surface-sunken);
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.sourceText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ct-ink-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.sourceHost {
+  color: var(--ct-ink-faint);
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  line-height: 1.3;
+}

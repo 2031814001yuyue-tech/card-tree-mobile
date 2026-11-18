@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+app/dist/
+app/certs/
+
+# Android 构建与本地配置
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/www/
+android/captures/
+android/local.properties
+
+# release 签名材料（绝不能进仓库）
+android/keystore.properties
+android/app/*.jks
+
+# 系统与日志
+Thumbs.db
+.DS_Store
+*.log

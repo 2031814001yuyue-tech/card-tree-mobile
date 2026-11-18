@@ -1,0 +1,352 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom)) 26px;
+  list-style: none;
+}
+
+/* 一行 = 一张「索引卡」；孩子用嵌套列表挂在它下面 */
+.node {
+  position: relative;
+  margin: 0;
+  list-style: none;
+}
+
+/* 孩子层：从父卡片底部接出来的生长线，串起这一层的兄弟 */
+.children {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 中间的孩子自己带着子树时，这一层的竖线要继续从子树左侧穿过去，接到下一个兄弟 */
+.children > .node:not(:last-child) > .children::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: -12px;
+  bottom: 0;
+  width: 1px;
+  background: var(--ct-branch);
+}
+
+.children > .node {
+  padding-left: 20px;
+}
+
+/* 「行走线」挂在卡片行上：行高就是卡片高，所以 50% 一定落在卡片中线 */
+.row {
+  position: relative;
+}
+
+.children > .node > .row::before,
+.children > .node > .row::after {
+  content: '';
+  position: absolute;
+  left: -10px;
+  width: 1px;
+  background: var(--ct-branch);
+}
+
+/* 上半段：从上一张卡片底部接到这张卡片的中线 */
+.children > .node > .row::before {
+  top: -12px;
+  height: calc(50% + 12px);
+}
+
+/* 下半段：不是这一层最后一个，就继续往下接下一个兄弟 */
+.children > .node > .row::after {
+  top: 50%;
+  bottom: -12px;
+}
+
+.children > .node:last-child > .row::after {
+  content: none;
+}
+
+/* 横枝：从竖线拐进卡片中线，收在卡片左边缘 */
+.children > .node .card::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -11px;
+  width: 10px;
+  height: 1px;
+  background: var(--ct-branch);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  padding: 12px 14px 13px;
+  border: 1px solid var(--ct-line);
+  border-radius: var(--ct-radius-card);
+  background: var(--ct-surface);
+  box-shadow: var(--ct-card-shadow);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.card:active {
+  background: var(--ct-surface-sunken);
+}
+
+.cardError {
+  border-color: color-mix(in srgb, var(--ct-danger) 45%, transparent);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 状态点：完成=生长绿，生成中=蓝色呼吸，出错=红，未完成=灰色 */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ct-thread);
+}
+
+.dot[data-status='done'] {
+  background: var(--ct-grow);
+}
+
+.dot[data-status='running'] {
+  background: var(--ct-blue);
+  box-shadow: 0 0 0 3px var(--ct-blue-soft);
+  animation: breath 1.8s ease-in-out infinite;
+}
+
+.dot[data-status='error'] {
+  background: var(--ct-danger);
+}
+
+@keyframes breath {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--ct-blue-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--ct-blue-soft);
+  }
+}
+
+.mode {
+  flex: none;
+  color: var(--ct-ink-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.mode[data-mode='child'] {
+  color: var(--ct-blue);
+}
+
+.mode[data-mode='diverge'] {
+  color: var(--ct-grow);
+}
+
+.mode[data-mode='branch'] {
+  color: var(--ct-amber);
+}
+
+.status {
+  flex: none;
+  color: var(--ct-ink-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.trail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.counts {
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ct-ink-faint);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--ct-ink-faint);
+  opacity: 0.55;
+}
+
+.prompt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--ct-ink);
+  font-size: 16.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+
+.answer {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--ct-ink-soft);
+  font-size: 13.5px;
+  line-height: 1.62;
+}
+
+.answerEcho {
+  color: var(--ct-ink-faint);
+  font-size: 13.5px;
+  line-height: 1.62;
+}
+
+/* 空态：一枚种子，两条新枝 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 88px 30px 24px;
+  text-align: center;
+}
+
+.emptyGlyph {
+  width: 64px;
+  height: 48px;
+  margin-bottom: 24px;
+  color: var(--ct-thread);
+}
+
+.emptyTitle {
+  color: var(--ct-ink);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.emptyText {
+  max-width: 264px;
+  margin: 10px 0 0;
+  color: var(--ct-ink-soft);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.emptyHint {
+  margin: 24px 0 0;
+  font-family: var(--ct-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--ct-ink-faint);
+}
+
+/* 入场：很轻的错峰上浮，只为了让人看清「这一层是从上一张卡长出来的」 */
+.node {
+  animation: node-in 320ms var(--ct-ease) both;
+  animation-delay: calc(var(--node-order, 0) * 24ms);
+}
+
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 搜索：卡片一多时按问题 / 回答 / 追问过滤，命中的卡片连同祖先链一起留下 */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: 12px 16px 0;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--ct-line);
+  border-radius: 12px;
+  background: var(--ct-surface);
+}
+
+.search:focus-within {
+  border-color: var(--ct-line-strong);
+  box-shadow: 0 0 0 3px var(--ct-blue-soft);
+}
+
+.searchIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--ct-ink-faint);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ct-ink);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.searchInput::placeholder {
+  color: var(--ct-ink-faint);
+}
+
+.searchClear {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  cursor: pointer;
+}
+
+.searchClear:active {
+  background: var(--ct-surface-sunken);
+}
+
+.searchEmpty {
+  margin: 48px 20px;
+  text-align: center;
+  color: var(--ct-ink-faint);
+  font-size: 13.5px;
+  line-height: 1.7;
+}

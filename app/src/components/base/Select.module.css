@@ -1,0 +1,124 @@
+/* 自定义选择器：和设置面板里其它字段同一套「纸面 + 发丝线」的语言，
+   触发器用等宽字体，像在读一行规格；菜单是浮在纸面上的一小叠卡片。 */
+
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-width: 90px;
+  max-width: 100%;
+  height: 40px;
+  padding: 0 38px 0 13px;
+  border: 1px solid var(--ct-line);
+  border-radius: 11px;
+  background: var(--ct-surface);
+  color: var(--ct-ink);
+  font: inherit;
+  font-family: var(--ct-font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color 140ms var(--ct-ease),
+    border-color 140ms var(--ct-ease);
+
+  &:hover:not(:disabled) {
+    background: var(--ct-surface-sunken);
+  }
+
+  &:focus-visible {
+    border-color: var(--ct-blue);
+    box-shadow: 0 0 0 3px var(--ct-blue-soft);
+  }
+
+  &:disabled {
+    color: var(--ct-ink-faint);
+    cursor: default;
+  }
+
+  > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.open {
+  border-color: var(--ct-blue);
+}
+
+.placeholder {
+  color: var(--ct-ink-faint);
+}
+
+.arrow {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: flex;
+  color: var(--ct-ink-faint);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.menu {
+  position: fixed;
+  z-index: 1200;
+  box-sizing: border-box;
+  min-width: 160px;
+  max-width: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid var(--ct-line);
+  background: var(--ct-surface);
+  box-shadow:
+    0 2px 6px rgba(19, 24, 40, 0.06),
+    0 18px 40px -18px rgba(19, 24, 40, 0.4);
+  animation: menu-in 140ms var(--ct-ease) both;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 4px 9px;
+  border-radius: 9px;
+  font-family: var(--ct-font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ct-ink-soft);
+  white-space: normal;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 120ms var(--ct-ease);
+
+  &:hover {
+    background: var(--ct-surface-sunken);
+    color: var(--ct-ink);
+  }
+
+  &[aria-selected='true'] {
+    color: var(--ct-blue);
+  }
+}

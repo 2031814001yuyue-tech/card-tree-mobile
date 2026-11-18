@@ -1,0 +1,500 @@
+import clsx from 'clsx'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { ModelInfo } from '../../services/api/types.js'
+import {
+  checkNativeWebUpdate,
+  clearNativeKey,
+  clearNativeSearchKey,
+  installNativeWebUpdate,
+  isNativeApp,
+  nativeHasKey,
+  nativeHasSearchKey,
+  nativeVersion,
+  nativeWebVersion,
+  saveNativeKey,
+  saveNativeSearchKey,
+} from '../../services/native.js'
+import {
+  setUpdateState,
+  subscribeUpdate,
+  updateState,
+} from '../../services/update.js'
+import {
+  REASONING_EFFORTS,
+  setApiBase,
+  setModel,
+  setReasoningEffort,
+  setThemePreference,
+  useSettings,
+  type ThemePreference,
+} from '../../services/settings.js'
+import { showToast } from '../base/toastState.js'
+import {
+  IconDownloadOutline16,
+  IconRefreshOutline16,
+  IconUploadOutline14,
+} from '../base/icons.js'
+import { Select } from '../base/Select.js'
+import { Sheet } from '../common/Sheet.js'
+import styles from './SettingsSheet.module.css'
+
+const EFFORT_LABEL: Record<string, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+}
+
+const THEMES: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+]
+
+const Pill = ({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: string
+}) => (
+  <button
+    type="button"
+    className={clsx(styles.pill, active && styles.pillActive)}
+    aria-pressed={active}
+    onClick={onClick}
+  >
+    {children}
+  </button>
+)
+
+export type SettingsSheetProps = {
+  open: boolean
+  onClose: () => void
+  models: ModelInfo[]
+  modelsLoading: boolean
+  modelsError: string | null
+  onReloadModels: () => void
+  onExportProject: () => void
+  onImportFile: (file: File) => void
+  onClearAll: () => void
+  /** 最近一次自动备份的时间（ISO），仅 APK 有效 */
+  lastBackupAt: string | null
+  /** 立即写一份自动备份 */
+  onBackupNow: () => void
+  /** 联网搜索 Key 变了：让 App 重新问一次服务端有没有配 */
+  onRefreshSearch: () => void
+}
+
+const formatBackupTime = (value: string | null) => {
+  if (!value) {
+    return '还没有备份过'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '还没有备份过'
+  }
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+const formatSize = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return ''
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  }
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 热更新区块（仅 APK）：当前网页层版本 + 检查 / 安装。 */
+const WebUpdate = () => {
+  const state = useSyncExternalStore(subscribeUpdate, updateState)
+  const webVersion = nativeWebVersion()
+
+  const runCheck = () => {
+    setUpdateState({ state: 'checking' })
+    // 桥方法是同步的，但里面有网络请求：放宏任务里跑，先把「正在检查」画出来
+    setTimeout(() => {
+      const result = checkNativeWebUpdate()
+      if (!result) {
+        setUpdateState({ state: 'error', message: '检查更新失败，稍后再试' })
+        return
+      }
+      if (result.available) {
+        setUpdateState({
+          state: 'available',
+          version: result.version,
+          notes: result.notes,
+          size: result.size,
+        })
+        return
+      }
+      setUpdateState({
+        state: 'uptodate',
+        message: result.error ?? `网页层已是最新（${webVersion ?? '当前版本'}）`,
+      })
+    }, 30)
+  }
+
+  const runInstall = () => {
+    if (installNativeWebUpdate()) {
+      setUpdateState({ state: 'installing', version: state.version, message: '正在准备…' })
+    } else {
+      showToast('更新已经在进行中')
+    }
+  }
+
+  return (
+    <div className={styles.updateRow}>
+      <div className={styles.backupInfo}>
+        <span className={styles.label}>网页层版本</span>
+        <span className={styles.count}>
+          {webVersion ?? nativeVersion() ?? '0.3.4'}
+          {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
+        </span>
+      </div>
+      {state.state === 'available' ? (
+        <button type="button" className={styles.actionButton} onClick={runInstall}>
+          <IconDownloadOutline16 />
+          {state.size ? `更新到 ${state.version}（${formatSize(state.size)}）` : `更新到 ${state.version}`}
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={styles.actionButton}
+          disabled={state.state === 'checking' || state.state === 'installing'}
+          onClick={runCheck}
+        >
+          <IconRefreshOutline16 />
+          {state.state === 'checking' ? '正在检查…' : '检查更新'}
+        </button>
+      )}
+      {state.state === 'installing' ? (
+        <p className={styles.hint}>{state.message ?? '正在安装…'}</p>
+      ) : null}
+      {state.state === 'available' && state.notes ? (
+        <p className={styles.hint}>{state.notes}</p>
+      ) : null}
+      {state.state === 'available' ? (
+        <p className={styles.hint}>只更新网页层，不重装 APK；下载失败会自动留在当前版本。</p>
+      ) : null}
+      {state.state === 'error' ? <p className={styles.error}>{state.message}</p> : null}
+      {state.state === 'uptodate' && state.message ? (
+        <p className={styles.hint}>{state.message}</p>
+      ) : null}
+    </div>
+  )
+}
+
+export const SettingsSheet = ({
+  open,
+  onClose,
+  models,
+  modelsLoading,
+  modelsError,
+  onReloadModels,
+  onExportProject,
+  onImportFile,
+  onClearAll,
+  lastBackupAt,
+  onBackupNow,
+  onRefreshSearch,
+}: SettingsSheetProps) => {
+  const settings = useSettings()
+  const [apiBase, setApiBaseInput] = useState(settings.apiBase)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const native = isNativeApp()
+  const [hasNativeKey, setHasNativeKey] = useState(() => nativeHasKey())
+  const [keyDraft, setKeyDraft] = useState('')
+  const [hasSearchKey, setHasSearchKey] = useState(() => nativeHasSearchKey())
+  const [searchDraft, setSearchDraft] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setApiBaseInput(useSettings.getState().apiBase)
+      setHasNativeKey(nativeHasKey())
+      setKeyDraft('')
+      setHasSearchKey(nativeHasSearchKey())
+      setSearchDraft('')
+    }
+  }, [open])
+
+  const version = nativeVersion() ?? '0.3.4'
+
+  // 模型列表还没回来时，也把当前模型显示出来
+  const options = models.some((item) => item.id === settings.model)
+    ? models.map((item) => item.id)
+    : [settings.model, ...models.map((item) => item.id)]
+
+  return (
+    <Sheet open={open} title="设置" onClose={onClose} size="full">
+      {native ? (
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>连接</h3>
+          <div className={styles.row}>
+            <span className={styles.label}>API Key</span>
+            <span className={styles.count}>{hasNativeKey ? '已配置，加密保存在本机' : '还没有配置'}</span>
+          </div>
+          <div className={styles.field}>
+            <input
+              className={styles.input}
+              type="password"
+              value={keyDraft}
+              placeholder={hasNativeKey ? '粘贴新的 Key 可以替换' : '粘贴 opencode go 的 API Key'}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(event) => setKeyDraft(event.target.value)}
+            />
+          </div>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              disabled={!keyDraft.trim()}
+              onClick={() => {
+                const value = keyDraft.trim()
+                if (!value) {
+                  return
+                }
+                if (!saveNativeKey(value)) {
+                  showToast('保存失败，再试一次')
+                  return
+                }
+                setKeyDraft('')
+                setHasNativeKey(true)
+                showToast('已保存到本机')
+                onReloadModels()
+              }}
+            >
+              保存 Key
+            </button>
+            {hasNativeKey ? (
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={() => {
+                  clearNativeKey()
+                  setHasNativeKey(false)
+                  showToast('已清除本机 Key')
+                  onReloadModels()
+                }}
+              >
+                清除 Key
+              </button>
+            ) : null}
+          </div>
+          <p className={styles.hint}>
+            Key 用 Android Keystore 加密后存在这台手机里，不上传、不随备份导出；换手机需要重新粘贴。
+          </p>
+        </section>
+      ) : null}
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>模型</h3>
+        <div className={styles.field}>
+          <span className={styles.label}>当前模型</span>
+          <Select
+            className={styles.modelSelect}
+            value={settings.model}
+            options={options.map((id) => ({ value: id, label: id }))}
+            onChange={setModel}
+            ariaLabel="当前模型"
+          />
+        </div>
+        <div className={styles.row}>
+          <span className={styles.label}>推理强度</span>
+          <div className={styles.pills}>
+            {REASONING_EFFORTS.map((effort) => (
+              <Pill
+                key={effort}
+                active={settings.reasoningEffort === effort}
+                onClick={() => setReasoningEffort(effort)}
+              >
+                {EFFORT_LABEL[effort] ?? effort}
+              </Pill>
+            ))}
+          </div>
+        </div>
+        {native ? null : (
+          <>
+            <label className={styles.field}>
+              <span className={styles.label}>接口地址</span>
+              <input
+                className={styles.input}
+                value={apiBase}
+                spellCheck={false}
+                onChange={(event) => setApiBaseInput(event.target.value)}
+                onBlur={() => setApiBase(apiBase)}
+              />
+            </label>
+            <p className={styles.hint}>
+              默认 <code>/api</code> 表示走你电脑上的中继（app/server.mjs），API Key 只存在电脑上，不会进手机。
+            </p>
+          </>
+        )}
+        <div className={styles.row}>
+          <button type="button" className={styles.linkButton} onClick={onReloadModels}>
+            <IconRefreshOutline16 />
+            {modelsLoading ? '正在获取模型…' : '刷新模型列表'}
+          </button>
+          <span className={styles.count}>{models.length} 个可用</span>
+        </div>
+        {modelsError ? <p className={styles.error}>{modelsError}</p> : null}
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>联网搜索</h3>
+        <div className={styles.row}>
+          <span className={styles.label}>DeepSeek Search API</span>
+          <span className={styles.count}>
+            {native ? (hasSearchKey ? '已配置，加密保存在本机' : '还没有配置') : '由电脑上的中继提供'}
+          </span>
+        </div>
+        {native ? (
+          <>
+            <div className={styles.field}>
+              <input
+                className={styles.input}
+                type="password"
+                value={searchDraft}
+                placeholder={
+                  hasSearchKey ? '粘贴新的 DeepSeek Key 可以替换' : '粘贴 DeepSeek 的 API Key（sk-…）'
+                }
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => setSearchDraft(event.target.value)}
+              />
+            </div>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.actionButton}
+                disabled={!searchDraft.trim()}
+                onClick={() => {
+                  const value = searchDraft.trim()
+                  if (!value) {
+                    return
+                  }
+                  if (!saveNativeSearchKey(value)) {
+                    showToast('保存失败，再试一次')
+                    return
+                  }
+                  setSearchDraft('')
+                  setHasSearchKey(true)
+                  onRefreshSearch()
+                  showToast('联网搜索已开通')
+                }}
+              >
+                保存搜索 Key
+              </button>
+              {hasSearchKey ? (
+                <button
+                  type="button"
+                  className={styles.actionButton}
+                  onClick={() => {
+                    clearNativeSearchKey()
+                    setHasSearchKey(false)
+                    onRefreshSearch()
+                    showToast('已关闭联网搜索')
+                  }}
+                >
+                  清除
+                </button>
+              ) : null}
+            </div>
+            <p className={styles.hint}>
+              联网搜索走 DeepSeek 官方 Search API，按搜索次数计费；这把 Key 和对话用的 Key
+              分开存，同样用 Android Keystore 加密，不上传、不随备份导出。
+            </p>
+          </>
+        ) : (
+          <p className={styles.hint}>
+            网页版的联网搜索由电脑上的中继转发：启动中继前设好环境变量{' '}
+            <code>DEEPSEEK_API_KEY</code>，或写进 <code>~/.dsh/.credentials.yaml</code>，重启后生效。
+          </p>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>外观</h3>
+        <div className={styles.row}>
+          <span className={styles.label}>主题</span>
+          <div className={styles.pills}>
+            {THEMES.map((theme) => (
+              <Pill
+                key={theme.value}
+                active={settings.themePreference === theme.value}
+                onClick={() => setThemePreference(theme.value)}
+              >
+                {theme.label}
+              </Pill>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>数据</h3>
+        <div className={styles.actions}>
+          <button type="button" className={styles.actionButton} onClick={onExportProject}>
+            <IconDownloadOutline16 />
+            导出当前项目
+          </button>
+          <button type="button" className={styles.actionButton} onClick={() => fileRef.current?.click()}>
+            <IconUploadOutline14 />
+            导入备份
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) {
+              onImportFile(file)
+            }
+            event.target.value = ''
+          }}
+        />
+        <p className={styles.hint}>
+          支持导入桌面版插件导出的 <code>state.json</code>（会拆成多个项目），以及本应用导出的项目备份。
+        </p>
+        {native ? (
+          <div className={styles.backupRow}>
+            <div className={styles.backupInfo}>
+              <span className={styles.label}>自动备份</span>
+              <span className={styles.count}>上次：{formatBackupTime(lastBackupAt)}</span>
+            </div>
+            <button type="button" className={styles.actionButton} onClick={() => onBackupNow()}>
+              立即备份
+            </button>
+            <p className={styles.hint}>
+              退到后台或每 5 分钟自动写一份到「下载 / CardTree / backups」，滚动保留最近 30 份；就算卸载 App，这些文件也还在手机上。
+            </p>
+          </div>
+        ) : null}
+        <button type="button" className={styles.dangerButton} onClick={onClearAll}>
+          清空本机所有数据
+        </button>
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>关于</h3>
+        <p className={styles.about}>
+          卡片树 {version} · 把对话拆成一张张卡片，长成一棵可以回看的树。界面参考 DeepSeek App
+          的移动端风格，模型通过 opencode go 订阅调用。
+        </p>
+        <p className={styles.hint}>
+          {native
+            ? '数据保存在这个 App 自己的本地存储里；卸载 App 会一起删除，重要项目记得导出备份。'
+            : '数据保存在浏览器 IndexedDB 里；换浏览器、清理网站数据都会丢失，重要项目记得导出备份。'}
+        </p>
+        {native ? <WebUpdate /> : null}
+      </section>
+    </Sheet>
+  )
+}
