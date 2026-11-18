@@ -74,6 +74,7 @@ public final class WebUpdater {
     private final String repo;
     private final String shellVersion;
     private final File webDir;
+    private final String apiBase;
 
     /**
      * @param baseDir App 的 files 目录（更新解压到这里）
@@ -81,10 +82,16 @@ public final class WebUpdater {
      * @param shellVersion 当前 APK 壳版本；从没热更新过时，网页层版本默认等于它
      */
     public WebUpdater(File baseDir, String repo, String shellVersion) {
+        this(baseDir, repo, shellVersion, "https://api.github.com");
+    }
+
+    /** 测试专用：把 GitHub API 指到本地服务器。Android 侧永远走上面的公开构造。 */
+    WebUpdater(File baseDir, String repo, String shellVersion, String apiBase) {
         this.baseDir = baseDir;
         this.repo = repo == null || !repo.contains("/") ? null : repo;
         this.shellVersion = shellVersion == null ? "0" : shellVersion;
         this.webDir = new File(baseDir, WEB_DIR);
+        this.apiBase = apiBase;
     }
 
     /** 当前网页层版本：装过热更新就是更新时的版本，否则等于 APK 壳版本。 */
@@ -113,7 +120,7 @@ public final class WebUpdater {
         if (repo == null) {
             return null;
         }
-        String url = "https://api.github.com/repos/" + repo + "/releases?per_page=10";
+        String url = apiBase + "/repos/" + repo + "/releases?per_page=10";
         HttpURLConnection connection = open(url, "application/vnd.github+json");
         int status;
         try {

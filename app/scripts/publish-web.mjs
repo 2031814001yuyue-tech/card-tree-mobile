@@ -16,7 +16,8 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { createHash, deflateRawSync, crc32 as zlibCrc32 } from 'node:zlib'
+import { createHash } from 'node:crypto'
+import { deflateRawSync, crc32 as zlibCrc32 } from 'node:zlib'
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'

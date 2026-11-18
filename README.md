@@ -2,7 +2,7 @@
 
 把「对话」拆成一张张卡片，长成一棵**可以回看的树**。
 
-这是桌面版 DSH 插件 [`dsh-card-tree`](../card-tree) 的手机版：单页 Web App，模型走 **opencode go 订阅**。有两种装法——**Android APK**（内置本地服务，装到手机上就不需要电脑），或者**网页 / PWA**（浏览器打开，聊天请求走电脑上的零依赖中继）。
+这是桌面版 DSH 插件 [`dsh-card-tree`](../card-tree) 的手机版：单页 Web App，模型走 **opencode go 订阅**。有两种装法——**Android APK**（内置本地服务，装到手机上就不需要电脑），或者**网页 / PWA**（浏览器打开，聊天请求走电脑上的零依赖中继）。APK 从 0.3.4 起**支持网页层热更新**：界面和功能的改动发到 GitHub Releases 就能推给已安装的 App，不用重装（见下文「热更新」）。
 
 界面重做了一套自己的视觉语言——**索引卡 + 生长线**：带纸纹的纸面画布、白色索引卡、一条从父卡拐进子卡的实线把树的层级画出来，卡片左上角探出 mono 字体的「签」（带穿绳孔）标明它在树里的位置。完整规范见 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
@@ -41,6 +41,10 @@
 | 联网搜索开关（提问前点亮） | 卡片里的来源列表与 [1] 引用 | APK 里单独配搜索 Key |
 | --- | --- | --- |
 | ![联网搜索开关](docs/preview/25-search-toggle.png) | ![来源列表](docs/preview/26-search-sources.png) | ![搜索设置](docs/preview/27-search-settings.png) |
+
+| 热更新：设置 → 关于（检查到新版 0.3.5） |
+| --- |
+| ![检查更新](docs/preview/28-update-available.png) |
 
 ## 功能
 
@@ -119,7 +123,7 @@
 |  | **Android APK** | **网页 / PWA** |
 | --- | --- | --- | --- |
 | 需要电脑吗 | 装好之后**不需要**（只有 API Key 要在首次启动时粘一次） | 每次用都要开着电脑上的中继 `node server.mjs` |
-| 怎么装 | 把 `dist/card-tree-mobile-0.3.3.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
+| 怎么装 | 把 `dist/card-tree-mobile-0.3.4.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
 | Key 存在哪 | 手机上（Android Keystore 加密） | 电脑上（`~/.dsh/.credentials.yaml`，手机不留 Key） |
 | 数据存在哪 | App 自己的本地存储 | 浏览器 IndexedDB |
 | 适合 | 随身当独立 App 用 | 想用浏览器 / iPhone / 不想装 APK |
@@ -128,7 +132,7 @@
 
 ## Android APK（不依赖电脑）
 
-产物：[`dist/card-tree-mobile-0.3.3.apk`](dist/card-tree-mobile-0.3.3.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
+产物：[`dist/card-tree-mobile-0.3.4.apk`](dist/card-tree-mobile-0.3.4.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
 
 **安装**
 
@@ -149,6 +153,18 @@ APK 里打包了一个只监听 `127.0.0.1` 的本地 HTTP 服务（纯 Java，�
 - 返回键：先关弹层 → 再回树 → 都没有才退出 App；状态栏 / 导航栏颜色跟随深浅色
 - **自动备份**：数据有改动后，退到后台或每 5 分钟由原生侧往「下载 / CardTree / backups」写一份 JSON，滚动保留 30 份（卸载 App 后这些文件仍在）
 
+### 热更新（0.3.4 起）：改界面不用重装 APK
+
+这个 App 90% 的代码是网页层（React + CSS），附件、联网搜索、界面重做这些改动全都只动网页层。0.3.4 开始，网页层可以通过 [GitHub Releases](https://github.com/2031814001yuyue-tech/card-tree-mobile/releases) 热更新：
+
+- **App 启动 4 秒后自动查一次**，有新版弹 toast；也可以「设置 → 关于 → 检查更新」手动查
+- 下载 → sha256 校验 → 解压到 App 私有目录 → 原子切换，成功后页面自动刷新，**不用重装 APK、不加任何权限**
+- **永远不会变砖**：内置在 APK `assets/www` 里的那一份永远保留，下载 / 校验失败就继续用内置版；想回到内置版，清一次 App 数据即可
+- 想自己发新版：改完代码后 `cd app && pnpm build && node scripts/publish-web.mjs --notes "这次改了什么"`（需要 [gh](https://cli.github.com/) 登录），脚本会把 `dist/` 打成 `web.zip`、算好 sha256、发一个 `web-v<版本>` 的 Release
+- 仓库必须是 **public**：App 是匿名读 Releases 的，private 仓库会 404
+
+只有 Java 壳本身要改时（比如要加新的原生桥方法）才需要发新 APK——这种改动会越来越少。
+
 **从源码构建**
 
 需要 JDK 17 与 Android SDK（`platforms;android-34`、`build-tools;34.0.0`），`android/local.properties` 里写 `sdk.dir=<SDK 路径>`：
@@ -165,9 +181,10 @@ cd ../android
 
 **已经验到什么程度**
 
-- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 6 / versionName 0.3.3、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
+- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 7 / versionName 0.3.4、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
 - `apksigner verify`：release APK 用 `card-tree-mobile` 自己的 keystore 签名（v2），证书 DN `CN=CardTree Mobile`，不是 debug 证书
 - APK 里 156 个网页资源齐全（index.html、manifest、icon 180/192/512、单个 hash 化的 js/css），端口固定与自动备份的 Java 代码都在包里
+- **热更新器全链路验过**：真实 GitHub API 检查（同版本返回「无更新」、旧版本能查到 `web-v0.3.4`）；用本地服务器扮演 GitHub 完整跑了一遍「下载 → sha256 校验 → 解压 156 个文件 → 原子切换 → LocalServer 从新目录发页面」，坏 sha256 被正确拒绝且不污染现有目录（详见 `docs/ANDROID.md`）
 - 把同一份 `LocalServer` 拿到桌面 JVM 上真跑了一遍：静态资源 / SPA 回退 / 404 / `/api/health`（含 `search:true`）/ `/api/models`（42 KB、32 个模型）/ `/api/chat/completions` 真实 SSE（29 个 chunk、首块 1ms、27 条 `data:` 事件）/ **`/api/deepseek/search` 真实搜索（200、771ms，返回 中国天气网 / 钱江晚报 两条真实结果）**
 - 新增交互（搜索、长按菜单、编辑、继续生成、项目背景、自动备份入口）用 Chrome CDP 在 390×844 视口逐屏截图验过，见上方截图
 - **附件端到端验过**：在 390×844 视口里用真实文件选择框塞进一个 txt + 一张图，选 `claude-haiku-5-5` 提问，模型正确答出文本里的型号（X-200）和图片里的数字（42）；两个附件都落进了 IndexedDB
@@ -242,6 +259,9 @@ pnpm dev     # rspack serve :8090，/api 自动代理到 127.0.0.1:8787
 pnpm type    # tsc 严格类型检查
 pnpm lint    # oxlint（当前 0 warning 0 error）
 pnpm smoke   # 真实打一次 opencode go，验证中继与流式
+
+# 发一版网页层热更新（需要 gh 登录；先 pnpm build）
+node scripts/publish-web.mjs --notes "这次改了什么"   # 加 --dry-run 先预览
 ```
 
 目录：
@@ -251,12 +271,14 @@ card-tree-mobile/
 ├─ app/
 │  ├─ server.mjs                零依赖中继：静态托管 dist + /api/models + /api/chat/completions(SSE) + /api/deepseek/search + HTTP/HTTPS
 │  ├─ scripts/make-cert.mjs     生成本地 CA 与服务器证书（装成 App 用）
+│  ├─ scripts/publish-web.mjs   把 dist/ 打包发布成 GitHub Release（网页层热更新）
 │  ├─ certs/                    自签证书（git 忽略；key.pem / ca.key 是私钥）
 │  ├─ src/app/design.css        视觉系统 token（--ct-*，索引卡 + 生长线，见 docs/DESIGN.md）
 │  ├─ src/services/tree/        卡片树领域层（context 上下文装配 / model 树变更 / db IndexedDB / io 导入导出 / store zustand）
 │  ├─ src/services/attachments.ts  图片压缩与文本文件读取（附件）
 │  ├─ src/services/api/chat.ts  浏览器端模型客户端（组合式 fetchModels / streamChat）
 │  ├─ src/services/search.ts    联网搜索客户端（/api/deepseek/search，兼容中继 sources 与 DeepSeek results）
+│  ├─ src/services/update.ts    热更新的 UI 状态（检查 / 下载进度 / 结果）
 │  ├─ src/components/tree/      树视图（嵌套列表 + 生长线）
 │  ├─ src/components/card/      卡片详情（单张纸面：思考、公式、追问、引用、统计）
 │  ├─ src/components/overview/  SVG 全览图（可拖动改树）
@@ -265,11 +287,12 @@ card-tree-mobile/
 ├─ android/                     Android 壳：WebView + 纯 Java 本地服务
 │  ├─ app/src/main/java/com/cardtree/mobile/
 │  │  ├─ MainActivity.java      WebView 壳、固定端口、返回键、文件选择、状态栏配色、导出备份
-│  │  ├─ LocalServer.java       127.0.0.1 固定端口的本地 HTTP 服务（静态资源 + /api 反代 + SSE 透传 + 搜索转发）
+│  │  ├─ LocalServer.java       127.0.0.1 固定端口的本地 HTTP 服务（静态资源 + /api 反代 + SSE 透传 + 搜索转发；静态资源优先读热更新目录）
 │  │  ├─ KeyVault.java          Android Keystore AES-256-GCM 加密保存 API Key（对话 / 搜索两把分开存）
-│  │  └─ NativeBridge.java      注入给网页的 window.CardTreeNative（含 saveAutoBackup 自动备份）
+│  │  ├─ WebUpdater.java        热更新器：查 GitHub Releases → 下载 → sha256 校验 → 解压 → 原子切换
+│  │  └─ NativeBridge.java      注入给网页的 window.CardTreeNative（含 saveAutoBackup 自动备份与热更新三个方法）
 │  └─ app/src/main/assets/www/  构建时从 app/dist 复制进来（git 忽略）
-├─ dist/                        打包好的安装包：card-tree-mobile-0.3.3.apk
+├─ dist/                        打包好的安装包：card-tree-mobile-0.3.4.apk
 └─ docs/                        FEASIBILITY.md（可行性 + M0–M5 计划）、DESIGN.md（视觉语言）、ANDROID.md（APK 架构与构建）、RELAY.md（中继细节）、preview/（截图）
 ```
 
@@ -296,6 +319,7 @@ card-tree-mobile/
 9. 数据默认只在当前设备：网页版清缓存就没了；APK 卸载会删掉应用内数据，但「下载 / CardTree / backups」里的自动备份文件还在，重装后可以导入恢复。重要内容仍建议手动导出。
 10. 全览图能拖卡片改上级、拉引用线（包括把根卡片重新挂到别的卡片下面），但不能手动摆节点位置（位置自动排布）；在手机上节点可能缩得比较小，按偏一点也会抓住最近的卡片。
 11. 无本地工具（读文件 / 抓网页）、无语音；附件与联网搜索都已支持——但联网搜索要**单独配一把 DeepSeek API Key**，而且按搜索次数计费（每次提问搜 5 条），不用时把开关关掉即可。
+12. **热更新的下载走 GitHub 的文件 CDN**：国内网络偶尔拉不动 `objects.githubusercontent.com`（本机试过一次 1.8 MB 下了十几分钟）。拉不动时 App 会留在当前版本、下次再试，不影响使用；网络好的时候（或挂代理）秒下。检查更新本身走 `api.github.com`，在实测网络下一直正常。
 
 ## 技术栈
 

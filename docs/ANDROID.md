@@ -1,4 +1,4 @@
-# Android APK 说明（card-tree-mobile 0.3.3）
+# Android APK 说明（card-tree-mobile 0.3.4）
 
 这份文档说明 `android/` 壳子是怎么工作的、怎么构建、以及验证到了哪一步。
 产品层面的安装步骤看 [`../README.md`](../README.md) 的「Android APK」一节。
@@ -17,18 +17,22 @@
 MainActivity.onCreate()
   ├─ KeyVault(this)                        对话 Key（Android Keystore AES-256-GCM）
   ├─ KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")   搜索 Key（另一把，同样加密）
-  ├─ LocalServer(assets, vault::get, searchVault::get, sessionId, "0.3.3", preferredPort)
+  ├─ WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION)              热更新器（见下节）
+  ├─ LocalServer(assets, vault::get, searchVault::get, sessionId, "0.3.4", preferredPort)
   │    ├─ ServerSocket(随机端口, 50, 127.0.0.1)   只监听本机回环；端口固定后复用
   │    └─ 后台线程 acceptLoop()             每连接一个线程（daemon 线程池）
   └─ WebView.loadUrl("http://127.0.0.1:<port>/")
         │
-        ├─ GET /                     → assets/www/index.html
+        ├─ GET /                     → files/web/index.html（热更新版）→ 没有再回 assets/www
         ├─ GET /static/js/main.*.js  → 静态资源（Cache-Control: no-store）
         ├─ GET /api/health           → {"ok":true,"mode":"android",...}
         ├─ GET /api/models           → 反代 opencode go，5 分钟缓存
         ├─ POST /api/chat/completions→ 反代并逐块透传 SSE
         │                               （注入 Authorization / x-opencode-session / User-Agent）
         └─ POST /api/deepseek/search → 反代 DeepSeek Search API（没有搜索 Key 时返回 409）
+
+（启动 4 秒后 web.postDelayed → checkWebUpdateSilently()：后台查一次 GitHub Releases，
+  有新版 toast 提示去「设置 → 关于」手动更新）
 ```
 
 要点：
@@ -67,14 +71,45 @@ MainActivity.onCreate()
 - 搜到的摘要会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息，并要求模型标 `[1][2]`；来源随卡片存 IndexedDB（`card.search`），所以离线回看时来源列表还在
 - 搜索失败 / 没配 Key 都不会阻塞提问：前端 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
 
+### 网页层热更新在 APK 里怎么走
+
+更新源是 GitHub Releases（仓库 `2031814001yuyue-tech/card-tree-mobile`，tag 形如 `web-v0.3.5`，资产 `web.zip` + `web.zip.sha256`）：
+
+```
+WebUpdater.check()
+  └─ GET https://api.github.com/repos/<repo>/releases?per_page=10   （匿名，60 req/h 够用）
+        └─ pickRelease：跳过 draft/prerelease；tag 必须是 web-v 前缀；
+           版本要比 currentWebVersion() 新；资产必须同时有 web.zip 和 sha256
+
+WebUpdater.install(info, progress)
+  ├─ 下载 web.zip（≤64MB）→ 按资产里的 sha256 校验，不一致直接取消
+  ├─ 解压到 files/web-staging/（canonical path 防 zip-slip，单文件 32MB / 总量 96MB 上限，
+  │   必须能找到 index.html，否则整个取消）
+  ├─ deleteRecursive(files/web/) → staging.renameTo(files/web)   ← 原子切换
+  └─ 写 files/web-version.txt = 新版本号（currentWebVersion() 以后读它）
+
+MainActivity 的 AssetSource：
+  updater.openUpdated(path) 有就先给 files/web/ 的；没有（或从没更新过）回 assets/www/
+  → 下载/校验/解压任何一步失败，App 都继续用内置版，不会变砖
+  → 清 App 数据 = 删掉 files/web → 回到 APK 内置版
+```
+
+- 触发点两个：启动 4 秒后静默查（只 toast 提示）；「设置 → 关于 → 检查更新」手动查 + 一键更新
+- 网页侧 `NativeBridge.checkWebUpdate()` 同步返回 JSON（available/version/size/notes/error），`installWebUpdate()` 抢到锁后开守护线程装，进度经 `window.__cardTreeUpdateProgress` 回传，装完 `window.__cardTreeUpdateDone(ok, message)` → 网页自动 `location.reload()`
+- 测试缝：`WebUpdater` 有一个包私有构造 `(baseDir, repo, shellVersion, apiBase)`，把 GitHub API 指到本地服务器用；Android 侧永远走公开构造（`apiBase = https://api.github.com`）
+- 发布命令：`cd app && pnpm build && node scripts/publish-web.mjs --notes "…"`（zip 是纯 Node 写的——PS 5.1 的 `Compress-Archive` 会写出反斜杠条目名，Android 的 ZipFile 解不开）
+- 仓库必须 **public**：App 匿名读 Releases，private 仓库 API 会 404
+- 只有 Java 壳要改（新增 `@JavascriptInterface` 方法、改路由等）才需要重新发 APK；纯网页层改动只发 Release
+
 ## 文件一览（`android/app/src/main/java/com/cardtree/mobile/`）
 
 | 文件 | 作用 |
 | --- | --- |
-| `MainActivity.java` | 唯一 Activity：起服务、配 WebView、处理返回键 / 文件选择 / 状态栏配色 / 导出备份 |
+| `MainActivity.java` | 唯一 Activity：起服务、配 WebView、处理返回键 / 文件选择 / 状态栏配色 / 导出备份、挂 WebUpdater、启动静默检查 |
 | `LocalServer.java` | 本地 HTTP/1.1 服务（纯 JDK，不依赖 Android）：静态资源 + `/api/models` `/api/chat/completions`（SSE 逐块透传）+ `/api/deepseek/search`（搜索转发） |
 | `KeyVault.java` | API Key 的加解密：Android Keystore 里生成不可导出的 AES-256-GCM 密钥，密文（iv + ciphertext）Base64 存 SharedPreferences；构造器带 `field` / `alias`，对话 Key 与搜索 Key 各存一把 |
-| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / version / setChrome / saveBackup / saveAutoBackup / toast` |
+| `WebUpdater.java` | 热更新器（纯 JDK）：查 GitHub Releases → 下载 → sha256 校验 → 解压 staging → 原子切换 `files/web` → 写版本号；内嵌一个小型 JSON 解析器只读 Releases 响应 |
+| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / version / setChrome / saveBackup / saveAutoBackup / toast / getWebVersion / checkWebUpdate / installWebUpdate` |
 | `AssetSource.java` | 一行接口，把 `assets/www/<path>` 抽象成 `InputStream`（方便在桌面 JVM 上测 `LocalServer`） |
 | `Mime.java` | 扩展名 → Content-Type |
 
@@ -109,19 +144,21 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 ### 版本号
 
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
-`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.3'` 的兜底值、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。
+`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.4'` 的兜底值、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
 ## 已做的验证
 
 | 项目 | 结果 |
 | --- | --- |
-| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='6' versionName='0.3.3'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
+| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='7' versionName='0.3.4'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
 | `apksigner verify` | release APK 由 `android/app/card-tree-release.jks` 签名（v2 方案），证书 DN `CN=CardTree Mobile` —— 不是 debug 证书 |
 | APK 内容 | 167 个条目，其中 156 个是 `assets/www/**`：`index.html`、`manifest.webmanifest`、`icon-180/192/512.png`、单个 hash 化的 `static/js/main.*.js` + `static/css/main.*.css` + KaTeX 字体 |
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
 | 网页侧 | `pnpm type` 0 error、`pnpm lint` 0 warning 0 error、`pnpm build` 通过 |
 | 联网搜索端到端 | 390×844 视口点亮「联网搜索」提问「杭州今天天气怎么样？」：真实搜到 5 条来源、回答带 `[1]–[5]`、卡片底部来源列表可点；思考过程里能看到 5 条资料摘要（见 `docs/preview/25-search-toggle.png`、`26-search-sources.png`） |
 | 原生 UI 路径 | 用 CDP 注入一个假的 `window.CardTreeNative`，在 390×844 视口截了「首次启动填 Key」和「设置 → 连接」两张图（见 `docs/preview/14-onboarding.png`、`15-settings-connect.png`） |
+| **WebUpdater 全链路** | **真实 GitHub API**：同版本（0.3.4）check → `null`（无更新）；低版本（0.0.1）check → 正确拿到 `web-v0.3.4`（tag/size/notes 齐全）。**本地服务器扮演 GitHub 完整安装**：check → 下载 → sha256 校验 → 解压 156 个文件（`index.html` 1450 B、`static/css/main.*.css` 73530 B 都能从 `files/web/` 读出）→ 原子切换 → `currentWebVersion()` 读回 `9.9.9`；`../` 目录穿越被拒绝；**sha256 不一致**时抛「更新包校验失败（sha256 不一致），已取消」且 `files/web` 不被创建、版本仍是壳版本 |
+| 发布脚本 | `node scripts/publish-web.mjs` 发布 `web-v0.3.4`（web.zip 1.78 MB、156 个条目、正斜杠路径），`jar tf` 验证 zip 结构正确；gh 前置检查（auth / tag 不存在）都过 |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 
@@ -141,3 +178,4 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 - **联网搜索点了没反应 / 显示「联网（未开通）」**：说明还没配第二把 Key。到「设置 → 联网搜索」粘贴一把 DeepSeek API Key（可以在 `platform.deepseek.com` 创建），保存后按钮就可以点亮了；搜索接口返回 409 也是同一个原因。
 - **联网搜索报错**：卡片上不会显示搜索错误（不阻塞回答），只会 toast 一句「联网搜索失败，这次先按不联网回答」；`/api/deepseek/search` 返回 502 多半是 Key 没有 Search API 权限或网络不通。
 - **升级后界面没变**：`gradle assembleDebug` 会重新复制 `app/dist` 并清空旧资源；确认先跑了 `pnpm build`。
+- **「检查更新」一直失败 / 下载不动**：检查更新走 `api.github.com`（匿名限流 60 次/小时/IP，一般够用，被限流会提示「访问太频繁」）；下载走 GitHub 的文件 CDN（`objects.githubusercontent.com`），国内网络偶尔拉不动——拉不动就留在当前版本下次再试，不影响使用。仓库必须是 public，private 会让检查一直 404。
