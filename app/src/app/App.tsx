@@ -158,6 +158,10 @@ export const App = () => {
     return nativeSupportsProviders() ? !nativeHasProviderKey(provider) : !nativeHasKey()
   })
   const [keyValue, setKeyValue] = useState('')
+  /** 左右滑切换后新视图的入场方向（'left' = 左滑前进，新页从右滑入；'right' = 右滑返回，新页从左滑入）；动画结束回 null */
+  const [slideDir, setSlideDir] = useState<'left' | 'right' | null>(null)
+  /** 滑动手势跟手拖动的内容层（直接操作 transform，不走 React state） */
+  const paneRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     void hydrate()
@@ -268,6 +272,8 @@ export const App = () => {
     let startY = 0
     let horizontal = false
     let tracking = false
+    /** 手势期间内容层被跟手拖过（松手时决定要不要弹回） */
+    let dragged = false
     const overlayOpen =
       drawerOpen ||
       overviewOpen ||
@@ -278,6 +284,22 @@ export const App = () => {
       quickCardId !== null ||
       mergeSourceId !== null ||
       keyNeeded
+    /** 松手后内容层复位：spring = 带弹回动画（没滑够阈值），否则瞬清（马上要切视图） */
+    const resetPane = (spring: boolean) => {
+      const pane = paneRef.current
+      if (!pane) {
+        return
+      }
+      if (spring && dragged) {
+        pane.style.transition = 'transform 200ms var(--ct-ease, ease)'
+        pane.style.transform = ''
+      } else {
+        pane.style.transition = ''
+        pane.style.transform = ''
+      }
+      pane.style.willChange = ''
+      dragged = false
+    }
     const onTouchStart = (event: TouchEvent) => {
       userTouchRef.current = true
       if (event.touches.length !== 1) {
@@ -303,6 +325,18 @@ export const App = () => {
       if (horizontal) {
         event.preventDefault()
       }
+      // 跟手拖动内容层（0.38 阻尼）：transform 走合成器线程，纵滚不受影响
+      if (horizontal && !overlayOpen) {
+        const pane = paneRef.current
+        if (pane) {
+          if (!dragged) {
+            pane.style.willChange = 'transform'
+            dragged = true
+          }
+          pane.style.transition = 'none'
+          pane.style.transform = `translateX(${(dx * 0.38).toFixed(1)}px)`
+        }
+      }
     }
     const onTouchEnd = (event: TouchEvent) => {
       userTouchRef.current = false
@@ -312,37 +346,54 @@ export const App = () => {
       tracking = false
       const touch = event.changedTouches[0]
       if (!touch) {
+        resetPane(true)
         return
       }
       const dx = touch.clientX - startX
       const dy = touch.clientY - startY
       if (!horizontal || Math.abs(dx) < 64 || Math.abs(dy) >= 48 || Math.abs(dy) * 1.5 > Math.abs(dx)) {
+        // 没滑够阈值：内容层弹回原位
+        resetPane(true)
         return
       }
       if (dx > 0) {
         if (overlayOpen) {
+          // 右滑关浮层：main 没拖（浮层盖着），无需动画
+          resetPane(true)
           window.__cardTreeBack?.()
           return
         }
         if (view === 'card') {
+          // 卡片 → 树：新视图（树）从左滑入
+          resetPane(false)
+          setSlideDir('right')
           useStore.getState().backToTree()
         } else {
+          // 树 → 抽屉：内容层弹回，抽屉自带滑入动画
+          resetPane(true)
           setDrawerOpen(true)
         }
         return
       }
       if (overlayOpen) {
+        resetPane(true)
         return
       }
       if (view === 'card') {
+        // 卡片 → 全览：内容层弹回，全览浮层自己淡入
+        resetPane(true)
         setOverviewOpen(true)
       } else if (lastCardIdRef.current) {
-        // 树视图左滑：回到最近看过的那张卡（不经 handleOpenCard，避免 effect 依赖函数）
+        // 树 → 卡片（最近看过的）：新视图（卡）从右滑入
+        resetPane(false)
+        setSlideDir('left')
         const target = lastCardIdRef.current
         if (el.scrollTop > 0) {
           treeScrollRef.current = el.scrollTop
         }
         useStore.getState().openCard(target)
+      } else {
+        resetPane(true)
       }
     }
     el.addEventListener('touchstart', onTouchStart, { passive: true })
@@ -768,6 +819,16 @@ export const App = () => {
       </header>
 
       <main className={styles.main} ref={mainRef}>
+        <div
+          ref={paneRef}
+          className={styles.slidePane}
+          data-dir={slideDir ?? undefined}
+          onAnimationEnd={() => {
+            if (slideDir !== null) {
+              setSlideDir(null)
+            }
+          }}
+        >
         {view === 'card' && card ? (
           <CardView
             project={project}
@@ -798,6 +859,7 @@ export const App = () => {
             onQuickMenu={setQuickCardId}
           />
         )}
+        </div>
       </main>
 
       {pageOverflow &&

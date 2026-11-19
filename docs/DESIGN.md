@@ -68,7 +68,7 @@
 - 树分支折叠按钮 `.fold`（0.3.5）：有子卡片的节点下方一行小字（mono 10.5px、淡字、active 下沉底色），展开态图标转 90°；折叠后显示「N 张子卡片」，生长线在该节点收口（`.row::after` 下半段线本来就不依赖 `<ul class=children>`，所以折叠不断线）。折叠状态记在 `localStorage`（`card-tree:collapsed`），搜索时强制全部展开。
 - 流式跟随与滚动恢复（**0.3.8 重做**，`App.tsx`）：`mainRef` 挂在 `<main>` 上；`followRef` 记「离底 <120px 才跟随」，`userTouchRef` 记「手指正压在屏幕上」。**按住期间绝不程序化滚动**——Android WebView 的 scroll 事件是异步节流的，拖动中只靠 scroll 事件判停会慢半拍，出现"往上拖又被拉回底部"（0.3.5–0.3.7 的真实 bug：滚动监听挂在 `ready=false` 时刻，从来没生效过）。松手后离底近才继续跟，往回翻过就停、回到底部自动恢复。监听统一在 `ready` 之后挂。
 - 浮动跳转按钮 `.jumpButton`（0.3.8，仿 DeepSeek 手机端）：内容超一屏才出现（`pageOverflow`，`scrollHeight-clientHeight>80`），40px 圆钮 fixed 右下、composer 上方；不在底部 = 「跳到底部」（跳过去并恢复跟随），已在底部 = 「回到顶部」（图标转 180°）。纸面底 + 发丝边 + 卡片影，不抢 composer 的注意力。
-- 左右滑切换层级（0.3.8）：水平位移 ≥64px 且主导方向才判定（`|dy|*1.5<|dx|`），move 中一旦判水平就 `preventDefault` 压掉纵向抖动；右滑 = 上一级（浮层 → 树 → 抽屉，与 Android 返回键同构），左滑 = 下一级（树 → 最近卡片，卡片 → 全览）。`.main` 上限定 `touch-action: pan-y`，把水平手势留给应用、也免掉浏览器的历史导航误触。
+- 左右滑切换层级（0.3.8，0.3.10 起带跟手与动画）：水平位移 ≥64px 且主导方向才判定（`|dy|*1.5<|dx|`），move 中一旦判水平就 `preventDefault` 压掉纵向抖动；右滑 = 上一级（浮层 → 树 → 抽屉，与 Android 返回键同构），左滑 = 下一级（树 → 最近卡片，卡片 → 全览）。`.main` 上限定 `touch-action: pan-y`，把水平手势留给应用、也免掉浏览器的历史导航误触。**0.3.10 丝滑化**：滑动中内容层 `.slidePane` 直接 `style.transform` 跟手（阻尼 0.38 + `will-change`，合成器线程不卡纵滚）；没滑够松手 200ms 弹回；主内容切换成功时新视图按方向播 `pane-in-left/right`（240ms，位移 56px + 淡入）；浮层切换（抽屉 / 全览）不走 pane 动画——抽屉自带 slide-in、全览带 `overlay-in` 200ms 淡入下移。动画结束 `onAnimationEnd` 清 `data-dir`，不留 transform 残留。
 - 「正在搜索…」胶囊 `.searching`（0.3.8）：搜索进行中（live.searching）替代 typing 三点，`IconSearchOutline16` 1.6s 匀速旋转 + 12.5px 文字，下沉底胶囊——比三点更明确"卡在哪一步"；追问区（followLive.searching）同样处理。
 - 追问编辑小按钮 `.followUpEdit`（0.3.6）：追问内容右下角一行右对齐的小按钮（图标 + 「编辑」，13px），hover 才上底色，生成中半透明禁用——它只改文字不重跑模型，所以是"悄悄改"的权重，不进卡片操作行那种一级 chip。
 - 单卡分享长图（0.3.6，`services/share.ts`）：纯 canvas 渲染 720px 宽，头部「卡片树」品牌 + 日期 + 项目名 + 3px 蓝色分隔条，正文走两档字号（放不下自动降一档），参考来源 mono 小字最多 5 条，底部一行水印；深浅色跟随当前主题。卡片操作行的「分享」chip 与树长按菜单的「分享成长图」都走它。
@@ -84,6 +84,8 @@
 | 卡片详情纸面 | 换卡片时淡入 + 轻微上移 | `sheet-in` 300ms，`translateY(10px)` + `scale(.995)` → 1 |
 | 树节点 | 进入时淡入 + 上移，按兄弟顺序错峰 | `node-in` 320ms，每级 `+24ms`（最多错 8 个） |
 | Sheet / 抽屉 | 上滑 / 侧滑 | 220ms |
+| 左右滑内容层 | 跟手拖动（阻尼 0.38）；松手切换时新视图按方向滑入 | `pane-in-left/right` 240ms，56px + 淡入；未达阈值弹回 200ms（0.3.10） |
+| 全览浮层 | 淡入 + 轻微下移 | `overlay-in` 200ms（0.3.10） |
 | 生成中状态点 | 缓慢呼吸 | 只在 running 时 |
 | 联网搜索图标 | 匀速旋转 1.6s（`.searching`） | 搜索进行中；reduced-motion 下停转 |
 | 拖拽节点 / 全览图缩放 | 实时 transform，不做弹簧 | — |

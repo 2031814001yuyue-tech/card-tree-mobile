@@ -129,6 +129,44 @@
   transform: rotate(180deg);
 }
 
+/* 左右滑切换的内容层：跟手拖动走 transform（合成器线程，不卡）；
+   松手切换时由 data-dir 触发新视图的入场动画，未达阈值时 JS 直接弹回 */
+.slidePane {
+  min-height: 100%;
+}
+
+.slidePane[data-dir='left'] {
+  animation: pane-in-left 240ms var(--ct-ease) both;
+}
+
+.slidePane[data-dir='right'] {
+  animation: pane-in-right 240ms var(--ct-ease) both;
+}
+
+/* 左滑前进（树 → 卡片）：新视图从右滑入 */
+@keyframes pane-in-left {
+  from {
+    opacity: 0.6;
+    transform: translateX(56px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 右滑返回（卡片 → 树）：新视图从左滑入 */
+@keyframes pane-in-right {
+  from {
+    opacity: 0.6;
+    transform: translateX(-56px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .footer {
   flex: none;
   padding: 4px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom))
