@@ -11,6 +11,7 @@
 import { create } from 'zustand'
 import { showToast } from '../../components/base/toastState.js'
 import { fetchModels, normalizeApiBase, streamChat } from '../api/chat.js'
+import { streamNativeSearchChat } from '../api/anthropic.js'
 import { ApiError } from '../api/types.js'
 import type { ChatMessage, ModelInfo } from '../api/types.js'
 import { isNativeApp, saveNativeAutoBackup, saveNativeBackup } from '../native.js'
@@ -29,7 +30,8 @@ import * as db from './db.js'
 import { downloadJson, exportAllProjectsJson, exportProjectJson, importDesktopState, importProjectJson } from './io.js'
 import * as model from './model.js'
 import type { LiveText } from './live.js'
-import type { Attachment, CardSearch, CardStats, Project } from './types.js'
+import type { Attachment, CardSearch, CardStats, Project, SearchSource } from './types.js'
+import { MAX_SEARCH_SOURCES } from './types.js'
 
 /** 卡片详情页底部输入框能选的四种生长方式（follow 不开新节点） */
 export type AskMode = 'follow' | 'child' | 'diverge' | 'isolated'
@@ -203,12 +205,18 @@ export const useStore = create<Store>((set, get) => {
     }
 
     const settings = useSettings.getState()
-
-    // 联网搜索：先搜、把来源写到卡片上，再带着搜索结果去问模型。
-    // 搜索失败（没配 DeepSeek Key / 网络问题）只提示一声，仍按不联网继续回答。
-    let searchResult: CardSearch | null = null
     const question = String(followUp ? followUp.prompt : card.prompt).trim()
-    if (options?.search && question) {
+
+    // 联网搜索分两种：
+    // - DeepSeek 官方订阅 = 原生模式：走 Anthropic 协议 + web_search 服务端工具，
+    //   模型自己决定搜什么、搜几轮，搜索穿插在流式回答里（和 DeepSeek 手机端同款）；
+    //   来源在流里收集，结束后写到卡片上。
+    // - 其它订阅 = 前置模式：先调 Search API 拿摘要拼进上下文再一次问模型。
+    // 前置模式搜索失败只提示一声，仍按不联网继续回答。
+    const nativeSearch =
+      options?.search === true && question.length > 0 && settings.provider === 'deepseek'
+    let searchResult: CardSearch | null = null
+    if (options?.search && question && !nativeSearch) {
       controller = null
       // searching:true 让卡片先显示「正在搜索…」，来源落卡后开始流式时自然消失
       set({ running: { cardId, followUpId }, live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
@@ -224,16 +232,24 @@ export const useStore = create<Store>((set, get) => {
         )
       }
     }
-    // 重答 / 换角度 / 继续生成时，沿用这张卡上次搜到的来源，不重复花钱再搜一遍
-    if (!searchResult) {
+    // 重答 / 换角度 / 继续生成时，沿用这张卡上次搜到的来源，不重复花钱再搜一遍。
+    // 原生模式例外：来源是这一轮流里新搜的，不拼旧搜索块。
+    if (!searchResult && !nativeSearch) {
       searchResult = (followUp ? followUp.search : card.search) ?? null
     }
 
     const system = buildSystem(project, card, { followUp })
     const attachments = (followUp ? followUp.attachments : card.attachments) ?? []
+    // 上下文预算按「当前模型真实声明的窗口」算（/models 的 limit.context）；
+    // 查不到（比如原生联网搜索用 Anthropic 端点的 deepseek-chat，不在 OpenAI 模型表里）
+    // 时：原生模式用 64K 保守值，其余退回 32K 兜底。
+    const currentModels = get().models
+    const contextWindow =
+      currentModels.find((item) => item.id === settings.model)?.contextWindow ??
+      (nativeSearch ? 64_000 : FALLBACK_CONTEXT_WINDOW)
     const budget = Math.max(
       1200,
-      contextBudget(FALLBACK_CONTEXT_WINDOW, estimateTokens(system)) -
+      contextBudget(contextWindow, estimateTokens(system)) -
         estimateAttachmentTokens(attachments) -
         estimateTokens(searchBlock(searchResult)),
     )
@@ -263,31 +279,80 @@ export const useStore = create<Store>((set, get) => {
     controller = new AbortController()
     const signal = controller.signal
     const target: RunTarget = { cardId, followUpId }
-    set({ running: target, live: { cardId, followUpId, answer: prefix, thinking: '' } })
+    // 原生模式先亮「正在搜索…」，等模型吐第一段正文才熄灭
+    set({
+      running: target,
+      live: { cardId, followUpId, answer: prefix, thinking: '', ...(nativeSearch ? { searching: true } : {}) },
+    })
 
     let answer = ''
     let thinking = ''
     let failure: unknown = null
     const finalAnswer = () => prefix + answer
+    const nativeSources: SearchSource[] = []
     try {
-      for await (const event of streamChat(normalizeApiBase(settings.apiBase), {
-        provider: settings.provider,
-        model: settings.model,
-        reasoningEffort: settings.reasoningEffort,
-        messages: requestMessages,
-        signal,
-      })) {
-        if (event.type === 'text') {
-          answer = event.text
-        } else if (event.type === 'thinking') {
-          thinking = event.text
+      if (nativeSearch) {
+        for await (const event of streamNativeSearchChat(
+          normalizeApiBase(settings.apiBase),
+          {
+            // Anthropic 端点只认 deepseek-chat / deepseek-reasoner
+            model: 'deepseek-chat',
+            system,
+            messages: requestMessages,
+            signal,
+          },
+          {
+            onSearching: () => {
+              set({ live: { cardId, followUpId, answer: finalAnswer(), thinking, searching: true } })
+            },
+            onSources: (sources) => {
+              for (const source of sources) {
+                if (!nativeSources.some((item) => item.url === source.url)) {
+                  nativeSources.push(source)
+                }
+              }
+            },
+          },
+        )) {
+          if (event.type === 'text') {
+            answer = event.text
+          } else if (event.type === 'thinking') {
+            thinking = event.text
+          }
+          if (event.type === 'text' || event.type === 'thinking') {
+            set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+          }
         }
-        if (event.type === 'text' || event.type === 'thinking') {
-          set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+      } else {
+        for await (const event of streamChat(normalizeApiBase(settings.apiBase), {
+          provider: settings.provider,
+          model: settings.model,
+          reasoningEffort: settings.reasoningEffort,
+          messages: requestMessages,
+          signal,
+        })) {
+          if (event.type === 'text') {
+            answer = event.text
+          } else if (event.type === 'thinking') {
+            thinking = event.text
+          }
+          if (event.type === 'text' || event.type === 'thinking') {
+            set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+          }
         }
       }
     } catch (error) {
       failure = error
+    }
+
+    // 原生模式：把这一轮流里搜到的来源写到卡片上（结束时一次写，流中不抢渲染）
+    if (nativeSearch && nativeSources.length > 0) {
+      const nativeSearchResult: CardSearch = {
+        query: question,
+        sources: nativeSources.slice(0, MAX_SEARCH_SOURCES),
+        searchedAt: Date.now(),
+      }
+      commit((current) => model.setSearch(current, cardId, followUpId, nativeSearchResult))
     }
 
     if (signal.aborted) {

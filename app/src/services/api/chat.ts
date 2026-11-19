@@ -26,8 +26,8 @@ export const normalizeApiBase = (value: string): string => {
   return base === '' ? '/api' : base
 }
 
-/** 从上游错误响应体里尽量取出可读的中文/英文原因 */
-const readErrorMessage = (text: string, fallback: string): string => {
+/** 从上游错误响应体里尽量取出可读的中文/英文原因（anthropic.ts 也复用） */
+export const readErrorMessage = (text: string, fallback: string): string => {
   try {
     const body: unknown = JSON.parse(text)
     if (
@@ -47,8 +47,8 @@ const readErrorMessage = (text: string, fallback: string): string => {
   return text.trim() || fallback
 }
 
-/** 统一的 fetch 包装：网络失败/被中止都转成 ApiError */
-const fetchOrThrow = async (
+/** 统一的 fetch 包装：网络失败/被中止都转成 ApiError（anthropic.ts 也复用） */
+export const fetchOrThrow = async (
   url: string,
   init: RequestInit,
   signal?: AbortSignal

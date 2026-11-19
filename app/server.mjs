@@ -12,6 +12,7 @@
  *   3. GET  /api/models            按订阅代理上游模型列表，内存缓存 5 分钟
  *   4. POST /api/chat/completions  按订阅代理上游流式聊天，字节级 SSE 透传
  *   5. POST /api/deepseek/search   联网搜索（DeepSeek 官方 Search API）
+ *   6. POST /api/deepseek/messages 原生联网搜索（DeepSeek 官方 Anthropic 协议，模型自主多轮搜索）
  *   6. GET  /ca.pem  /ca.crt       自签根证书下载（手机「装成 App」要先信任它）
  *
  * 订阅（0.3.5 起）：四家上游全部 OpenAI 兼容，浏览器用 x-card-tree-provider
@@ -522,6 +523,100 @@ const handleChat = async (req, res) => {
   }
 }
 
+// ─────────────────────── /api/deepseek/messages ──────────────────────
+// 转发到 DeepSeek 官方 Anthropic 协议端点（/anthropic/v1/messages）。
+// 这是「原生联网搜索」：模型自己带着 web_search 服务端工具决定搜什么、搜几轮，
+// 搜索穿插在流式回答里 —— 和 DeepSeek 手机端 App 同一套机制。
+// Key 与联网搜索共用 DeepSeek 官方那把（DEEPSEEK_KEY）。
+
+const DEEPSEEK_ANTHROPIC_URL = (
+  process.env.DEEPSEEK_ANTHROPIC_URL || 'https://api.deepseek.com/anthropic/v1/messages'
+).trim()
+
+const ANTHROPIC_TIMEOUT_MS = 10 * 60_000
+
+const handleAnthropic = async (req, res) => {
+  if (DEEPSEEK_KEY === null) {
+    sendJson(res, 409, {
+      error: {
+        code: 'search_unavailable',
+        message:
+          '这台中继没有配置 DEEPSEEK_API_KEY，原生联网搜索不可用。在 ~/.dsh/.credentials.yaml 里加一行 DEEPSEEK_API_KEY: <key>，或在启动前设置环境变量，然后重启中继。',
+      },
+    })
+    return
+  }
+  let body
+  try {
+    body = await readRequestBody(req)
+  } catch (error) {
+    const tooLarge = error?.code === 'BODY_TOO_LARGE'
+    sendJson(res, tooLarge ? 413 : 400, {
+      error: { message: tooLarge ? '请求体过大' : `读取请求体失败：${error instanceof Error ? error.message : String(error)}` },
+    })
+    return
+  }
+
+  const controller = new AbortController()
+  const abortUpstream = () => {
+    if (!res.writableEnded) {
+      controller.abort()
+    }
+  }
+  res.on('close', abortUpstream)
+
+  try {
+    const upstream = await fetch(DEEPSEEK_ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': DEEPSEEK_KEY,
+        authorization: `Bearer ${DEEPSEEK_KEY}`,
+        'anthropic-version': '2023-06-01',
+        accept: 'text/event-stream',
+        'user-agent': RELAY_USER_AGENT,
+      },
+      body,
+      signal: controller.signal,
+    })
+    const contentType = upstream.headers.get('content-type') || 'text/event-stream; charset=utf-8'
+    res.statusCode = upstream.status
+    res.setHeader('content-type', contentType)
+    res.setHeader('cache-control', 'no-store')
+    res.setHeader('x-accel-buffering', 'no')
+
+    if (!upstream.ok) {
+      const errorBody = Buffer.from(await upstream.arrayBuffer())
+      res.setHeader('content-length', String(errorBody.length))
+      res.end(errorBody)
+      return
+    }
+    if (!upstream.body) {
+      res.end()
+      return
+    }
+    await pipeline(Readable.fromWeb(upstream.body), res)
+  } catch (error) {
+    if (controller.signal.aborted || res.destroyed) {
+      res.destroy()
+      return
+    }
+    if (!res.headersSent) {
+      sendJson(res, 502, {
+        error: {
+          message: `无法访问 DeepSeek Anthropic 端点 ${DEEPSEEK_ANTHROPIC_URL}：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        },
+      })
+    } else {
+      res.destroy()
+    }
+  } finally {
+    res.off('close', abortUpstream)
+  }
+}
+
 // ─────────────────────── /api/deepseek/search ──────────────────────
 // 转发到 DeepSeek 官方 Search API（api.deepseek.com/v1/tools/search）。
 // 和聊天用的是两把不同的 Key：聊天走 opencode go 订阅，搜索走 DeepSeek 账号。
@@ -792,6 +887,14 @@ const handleRequest = async (req, res) => {
       return
     }
     await handleSearch(req, res)
+    return
+  }
+  if (pathname === '/api/deepseek/messages') {
+    if (req.method !== 'POST') {
+      methodNotAllowed(res, 'POST')
+      return
+    }
+    await handleAnthropic(req, res)
     return
   }
   if (isApi) {

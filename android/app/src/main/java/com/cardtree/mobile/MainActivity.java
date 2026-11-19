@@ -38,7 +38,7 @@ import java.util.UUID;
  */
 public final class MainActivity extends Activity {
 
-    public static final String APP_VERSION = "0.3.6";
+    public static final String APP_VERSION = "0.3.9";
 
     /** 网页层热更新从这个仓库的 GitHub Releases 拿（tag 形如 web-v0.3.5，附带 web.zip + 哈希）。 */
     private static final String UPDATE_REPO = "2031814001yuyue-tech/card-tree-mobile";

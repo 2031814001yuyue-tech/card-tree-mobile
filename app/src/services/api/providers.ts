@@ -58,7 +58,7 @@ export const PROVIDERS: readonly ProviderPreset[] = [
     defaultModel: 'deepseek-flash',
     supportsEffort: true,
     sendUsageOption: true,
-    note: 'deepseek-flash / deepseek-v4-pro，按量计费',
+    note: 'deepseek-flash / deepseek-v4-pro，按量计费；开「联网搜索」时自动切原生模式（deepseek-chat，模型自主多轮搜索，和 DeepSeek 手机端同款）',
   },
 ]
 

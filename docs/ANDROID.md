@@ -1,4 +1,4 @@
-# Android APK 说明（card-tree-mobile 0.3.6）
+# Android APK 说明（card-tree-mobile 0.3.9）
 
 这份文档说明 `android/` 壳子是怎么工作的、怎么构建、以及验证到了哪一步。
 产品层面的安装步骤看 [`../README.md`](../README.md) 的「Android APK」一节。
@@ -31,7 +31,9 @@ MainActivity.onCreate()
         ├─ GET /api/models           → 按 x-card-tree-provider 路由四家上游，每家 5 分钟缓存
         ├─ POST /api/chat/completions→ 按头路由四家并逐块透传 SSE
         │                               （一律注入 Authorization；opencode 另补 x-opencode-session / UA）
-        └─ POST /api/deepseek/search → 反代 DeepSeek Search API（没有搜索 Key 时返回 409）
+        ├─ POST /api/deepseek/search → 反代 DeepSeek Search API（前置模式；没有搜索 Key 时返回 409）
+        └─ POST /api/deepseek/messages→ 反代 DeepSeek Anthropic 端点（0.3.9 原生联网搜索：
+                                        x-api-key + anthropic-version，SSE 逐块透传；没有 Key 时 409）
 
 （启动 4 秒后 web.postDelayed → checkWebUpdateSilently()：后台查一次 GitHub Releases，
   有新版 toast 提示去「设置 → 关于」手动更新）
@@ -56,7 +58,9 @@ MainActivity.onCreate()
 
 ### 联网搜索在 APK 里怎么走
 
-搜索结果不是靠对话模型「猜」出来的，走的是 DeepSeek 官方 Search API：
+搜索有**两种模式**（0.3.9 起），由当前订阅决定：
+
+**前置模式（opencode go / 智谱 / Kimi 订阅）**——DeepSeek 官方 Search API：
 
 ```
 网页（services/search.ts）
@@ -68,10 +72,24 @@ MainActivity.onCreate()
                           → 状态码与响应体原样透传
 ```
 
-- 网页侧**两种返回结构都认**：中继版返回 `{sources:[…]}`，APK 直连 DeepSeek 返回 `{results:[…]}`（`services/search.ts` 里优先读 `sources`，没有就读 `results`，`publishedAt` 兼容 `date`）
-- 搜索 Key 是**独立一把**：`KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")`——0.3.5 起它同时是「DeepSeek 官方」订阅的对话 Key（同 field / alias，「设置 → 联网搜索」与「设置 → 连接（DeepSeek 官方时）」看到的就是同一把）；其它订阅的对话 Key 各用各的 field，互不影响
-- 搜到的摘要会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息，并要求模型标 `[1][2]`；来源随卡片存 IndexedDB（`card.search`），所以离线回看时来源列表还在
-- 搜索失败 / 没配 Key 都不会阻塞提问：前端 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
+**原生模式（DeepSeek 官方订阅，0.3.9 新增）**——Anthropic 协议 + 服务端 web_search 工具，和 DeepSeek 手机端同一套机制：
+
+```
+网页（services/api/anthropic.ts streamNativeSearchChat）
+  └─ POST /api/deepseek/messages {model:"deepseek-chat", stream:true, tools:[web_search max_uses:5], messages, system?}
+        └─ LocalServer.handleAnthropic
+              ├─ searchKeys.get() 为空 → 409（提示切到 DeepSeek 官方订阅并粘 Key）
+              └─ 有 Key → POST https://api.deepseek.com/anthropic/v1/messages
+                          （x-api-key + Bearer + anthropic-version: 2023-06-01，SSE 4096 字节逐块 flush）
+                          → server_tool_use / web_search_tool_result / text_delta 原样透传
+```
+
+- 原生模式下**模型自主**决定搜不搜、搜什么、搜几轮（上限 `max_uses:5`）；网页侧 `onSearching` 显示「正在搜索…」、`onSources` 收集 `web_search_result`（title/url）写进 `followUp.search` / `card.search`；回答天然带 `[1][2]` 引用
+- `store.ts` 的 `run()`：`provider==='deepseek'` 且开了联网 → 走 `streamNativeSearchChat`（跳过前置搜索、不拼 searchBlock）；其它订阅照旧前置模式。重答 / 换角度沿用卡片旧来源（原生模式重答走普通流式 + 旧来源，不再花钱搜索）
+- 搜索 Key 是**独立一把**：`KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")`——它同时是「DeepSeek 官方」订阅的对话 Key（同 field / alias，「设置 → 联网搜索」与「设置 → 连接（DeepSeek 官方时）」看到的就是同一把）；其它订阅的对话 Key 各用各的 field，互不影响
+- 前置模式下网页侧**两种返回结构都认**：中继版返回 `{sources:[…]}`，APK 直连 DeepSeek 返回 `{results:[…]}`（`services/search.ts` 里优先读 `sources`，没有就读 `results`，`publishedAt` 兼容 `date`）
+- 搜到的摘要（前置模式）会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息；两种模式的来源都随卡片存 IndexedDB，离线回看时来源列表还在
+- 前置模式搜索失败 / 没配 Key 都不会阻塞提问：前端 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
 
 ### 多订阅（四家上游）在 APK 里怎么走
 
@@ -127,7 +145,7 @@ MainActivity 的 AssetSource：
 | 文件 | 作用 |
 | --- | --- |
 | `MainActivity.java` | 唯一 Activity：起服务、配 WebView、处理返回键 / 文件选择 / 状态栏配色 / 导出备份、挂 WebUpdater、启动静默检查 |
-| `LocalServer.java` | 本地 HTTP/1.1 服务（纯 JDK，不依赖 Android）：静态资源 + `/api/models` `/api/chat/completions`（SSE 逐块透传）+ `/api/deepseek/search`（搜索转发） |
+| `LocalServer.java` | 本地 HTTP/1.1 服务（纯 JDK，不依赖 Android）：静态资源 + `/api/models` `/api/chat/completions`（SSE 逐块透传）+ `/api/deepseek/search`（前置搜索转发）+ `/api/deepseek/messages`（0.3.9 原生联网搜索，Anthropic 端点 SSE 透传） |
 | `KeyVault.java` | API Key 的加解密：Android Keystore 里生成不可导出的 AES-256-GCM 密钥，密文（iv + ciphertext）Base64 存 SharedPreferences；构造器带 `field` / `alias`，对话 Key 与搜索 Key 各存一把 |
 | `WebUpdater.java` | 热更新器（纯 JDK）：查 GitHub Releases → 下载（可走镜像前缀，失败回直连）→ sha256 校验 → 解压 staging → 原子切换 `files/web` → 写版本号；内嵌一个小型 JSON 解析器只读 Releases 响应 |
 | `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / hasProviderKey / saveProviderKey / clearProviderKey / version / setChrome / saveBackup / saveAutoBackup / saveImage / toast / getWebVersion / checkWebUpdate / installWebUpdate / setUpdateMirror / getUpdateMirror` |
@@ -174,7 +192,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 
 | 项目 | 结果 |
 | --- | --- |
-| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='9' versionName='0.3.6'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
+| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='10' versionName='0.3.9'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
 | `apksigner verify` | release APK 由 `android/app/card-tree-release.jks` 签名（v2 方案），证书 DN `CN=CardTree Mobile` —— 不是 debug 证书 |
 | APK 内容 | 167 个条目，其中 156 个是 `assets/www/**`：`index.html`、`manifest.webmanifest`、`icon-180/192/512.png`、单个 hash 化的 `static/js/main.*.js` + `static/css/main.*.css` + KaTeX 字体 |
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
@@ -188,6 +206,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | 0.3.6 新交互 | CDP 文本 dump 验证：卡片操作行六 chip（含「分享」）、追问右下「编辑」、分享 toast、模型菜单「能看图 · 上下文 1M」（读自真实 `/models` 的 `limit.context` 字段——注意不是 `context_window`）、「导出全部项目」按钮、「下载镜像」输入框（见 `docs/preview/34–37`） |
 | **卡片合并（0.3.7，纯网页层）** | CDP 端到端三链路全验：卡片操作行「合并」chip 与长按菜单「并入另一张卡…」两个入口都真跑——IndexedDB 逐项核对源卡删除、追问转移、子卡改挂目标卡、引用去重合并、其它卡对源卡的引用改指目标卡；合并后正看源卡自动回树。**顺带修真 bug**：长按抬手的合成 click 会落在刚打开浮层的遮罩上把菜单立刻关掉（Sheet 加 350ms 打开宽容期，`Input.dispatchTouchEvent` hold 700ms 复现验证） |
 | **流式跟随 / 浮动按钮 / 左右滑（0.3.8，纯网页层）** | CDP 全验：滚动后跳底钮出现、两态切换（跳底 atBottomGap:0 / 跳顶 top:0）、树右滑开抽屉、抽屉右滑关、卡右滑回树、树左滑回最近卡、卡左滑开全览、按住期间流式不拉走滚动位置；追问区的「正在搜索…」350ms 可见、搜索结束消失。**顺带修真 bug**：0.3.5 起的跟随拉回底部（scroll/resize 监听挂在 `ready=false` 时刻从未生效——`mainRef.current=null` 时挂了个空；0.3.8 改为 `ready` 后挂并加 `userTouchRef` 按住即停）。**测试坑**：CDP touch 起点 x<80 会触发 Chrome 历史导航手势把页面导走，起点要 ≥100 |
+| **原生联网搜索（0.3.9，壳改动）** | 三层验证：①中继真实冒烟（`POST /api/deepseek/messages` → 200 SSE，`server_tool_use` 1 次、`web_search_tool_result` 10 条来源、`text_delta` 55 段、首字 1635ms、总 2062ms）；②APK JVM harness（`handleAnthropic` 直连上游：200、2 轮搜索、10 条来源、48 段正文流式、`System.exit(0)` 干净退出）；③CDP e2e（localStorage 切 provider=deepseek → 开联网 pill → 发追问 → 900ms 显示「正在搜索…」→ 16s 完成，`followUp.search` 落库 5 条来源、回答带 `[1][2][3][4]` 引用、UI「联网搜索 · 5 条来源」）。**顺带改进**：上下文预算改按 `/models` 真实窗口算（deepseek-flash 1M → 预算约 55 万 token，此前写死 32K） |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 

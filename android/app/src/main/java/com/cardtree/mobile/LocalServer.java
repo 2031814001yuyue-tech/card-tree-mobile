@@ -49,6 +49,7 @@ public final class LocalServer implements Closeable {
 
     /** 联网搜索走 DeepSeek 官方 Search API（和对话模型的上游不是同一家） */
     public static final String SEARCH_UPSTREAM = "https://api.deepseek.com/v1/tools/search";
+    public static final String ANTHROPIC_UPSTREAM = "https://api.deepseek.com/anthropic/v1/messages";
 
     /** 四家订阅上游：都是 OpenAI 兼容协议，差异只在 base 和要不要会话头。 */
     private static final Provider[] PROVIDERS = {
@@ -256,6 +257,14 @@ public final class LocalServer implements Closeable {
                 handleSearch(out, body);
                 return;
             }
+            if ("/api/deepseek/messages".equals(path)) {
+                if (!"POST".equals(method)) {
+                    sendText(out, 405, "Method Not Allowed");
+                    return;
+                }
+                handleAnthropic(out, body);
+                return;
+            }
             if (path.startsWith("/api/")) {
                 sendJson(out, 404, "{\"error\":\"not_found\"}");
                 return;
@@ -438,6 +447,68 @@ public final class LocalServer implements Closeable {
 
     // ------------------------------------------------------------------
     // 订阅路由
+
+    /**
+     * 原生联网搜索转发：把网页发来的 Anthropic 协议请求体原样转给 DeepSeek 官方
+     * {@code /anthropic/v1/messages}（SSE 逐块透传）。Key 与联网搜索共用 DeepSeek 那把。
+     */
+    private void handleAnthropic(OutputStream out, byte[] body) throws IOException {
+        String key = searchKeys == null ? null : searchKeys.get();
+        if (key == null || key.isEmpty()) {
+            sendJson(out, 409, "{\"error\":{\"code\":\"search_unavailable\","
+                    + "\"message\":\"还没有配置 DeepSeek 官方 API Key，到「设置 → 连接」里切换到 DeepSeek 官方并粘贴一把 Key。\"}}");
+            return;
+        }
+        byte[] payload = body == null ? new byte[0] : body;
+        HttpURLConnection connection =
+                (HttpURLConnection) new URL(ANTHROPIC_UPSTREAM).openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setConnectTimeout(20_000);
+        connection.setReadTimeout(600_000);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Accept", "text/event-stream");
+        connection.setRequestProperty("Accept-Encoding", "identity");
+        connection.setRequestProperty("x-api-key", key);
+        connection.setRequestProperty("Authorization", "Bearer " + key);
+        connection.setRequestProperty("anthropic-version", "2023-06-01");
+        connection.setRequestProperty("User-Agent", "card-tree-mobile/" + version + " (android)");
+        try (OutputStream upstreamOut = connection.getOutputStream()) {
+            upstreamOut.write(payload);
+            upstreamOut.flush();
+        }
+        int status = connection.getResponseCode();
+        String contentType = connection.getContentType();
+        if (status < 200 || status >= 300) {
+            byte[] error = readAll(connection.getErrorStream());
+            sendRaw(out, status,
+                    contentType == null ? "application/json; charset=utf-8" : contentType, error);
+            connection.disconnect();
+            return;
+        }
+        String head = "HTTP/1.1 200 OK\r\n"
+                + "Content-Type: " + (contentType == null || contentType.isEmpty()
+                        ? "text/event-stream; charset=utf-8" : contentType) + "\r\n"
+                + "Cache-Control: no-store\r\n"
+                + "Connection: close\r\n"
+                + "X-Accel-Buffering: no\r\n"
+                + "\r\n";
+        out.write(head.getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        InputStream upstream = connection.getInputStream();
+        byte[] buffer = new byte[4096];
+        try {
+            int read;
+            while (!closed.get() && (read = upstream.read(buffer)) >= 0) {
+                out.write(buffer, 0, read);
+                out.flush();
+            }
+        } catch (IOException ignored) {
+            // WebView 主动取消（点停止）时会断开连接
+        } finally {
+            connection.disconnect();
+        }
+    }
 
     /** 缺头 / 空头都按 opencode 处理，兼容不带头的旧网页层。 */
     private static String providerId(Map<String, String> headers) {
