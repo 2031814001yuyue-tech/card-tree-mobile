@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { IconButton } from '../base/IconButton.js'
 import { IconCloseOutline16 } from '../base/icons.js'
 import styles from './Sheet.module.css'
@@ -13,12 +13,18 @@ export type SheetProps = {
   size?: 'auto' | 'full'
 }
 
+/** 浮层刚打开的这点时间里，长按手势抬手会合成一次落点在遮罩上的 click——忽略它 */
+const OPEN_GRACE_MS = 350
+
 /** 底部弹出的半屏面板，点遮罩或 Esc 关闭 */
 export const Sheet = ({ open, title, onClose, children, size = 'auto' }: SheetProps) => {
+  const openedAt = useRef(0)
+
   useEffect(() => {
     if (!open) {
       return
     }
+    openedAt.current = Date.now()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose()
@@ -32,7 +38,16 @@ export const Sheet = ({ open, title, onClose, children, size = 'auto' }: SheetPr
     return null
   }
   return (
-    <div className={styles.mask} role="presentation" onClick={onClose}>
+    <div
+      className={styles.mask}
+      role="presentation"
+      onClick={() => {
+        if (Date.now() - openedAt.current < OPEN_GRACE_MS) {
+          return
+        }
+        onClose()
+      }}
+    >
       <div
         className={clsx(styles.sheet, size === 'full' && styles.full)}
         role="dialog"

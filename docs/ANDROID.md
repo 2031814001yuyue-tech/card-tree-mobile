@@ -168,6 +168,8 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
 `android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.6'` 的兜底值（有两处，含 WebUpdate 组件里那处）、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
+**纯网页层的改动不需要动 APK**：壳没变时只改 `app/package.json` 的 `version` 和 SettingsSheet 两处兜底（如 0.3.7 的卡片合并），发一个 `web-v<x.y.z>` 的 Release 即可，装了旧 APK 的用户「检查更新」就能拿到；`versionCode` / `APP_VERSION` 保持不变，`aapt2` 验证结果也不变。
+
 ## 已做的验证
 
 | 项目 | 结果 |
@@ -184,6 +186,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | 四家订阅路由 | `GET /api/models` 带 `x-card-tree-provider` 四家全 200；kimi / deepseek / opencode 流式对话真跑通（31 / 17 / 8 chunks）；智谱返回 429「套餐已到期」原样透传；未知头 400 `provider_unknown`；「设置 → 连接」随当前订阅显示（CDP 假桥注入验证，见 `docs/preview/29-providers.png`） |
 | **镜像回退（0.3.6）** | 本地双 HttpServer 扮演直连源与镜像源：配好镜像时 `install` 全程走镜像装包成功（LOG 无回退）；镜像指向无人监听端口时自动报「镜像下载失败，改用直连」并回退直连成功；空镜像直连回归正常。手写 STORED zip 验证了解压路径（教训：单文件 zip 的 CRC 必须真算） |
 | 0.3.6 新交互 | CDP 文本 dump 验证：卡片操作行六 chip（含「分享」）、追问右下「编辑」、分享 toast、模型菜单「能看图 · 上下文 1M」（读自真实 `/models` 的 `limit.context` 字段——注意不是 `context_window`）、「导出全部项目」按钮、「下载镜像」输入框（见 `docs/preview/34–37`） |
+| **卡片合并（0.3.7，纯网页层）** | CDP 端到端三链路全验：卡片操作行「合并」chip 与长按菜单「并入另一张卡…」两个入口都真跑——IndexedDB 逐项核对源卡删除、追问转移、子卡改挂目标卡、引用去重合并、其它卡对源卡的引用改指目标卡；合并后正看源卡自动回树。**顺带修真 bug**：长按抬手的合成 click 会落在刚打开浮层的遮罩上把菜单立刻关掉（Sheet 加 350ms 打开宽容期，`Input.dispatchTouchEvent` hold 700ms 复现验证） |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 

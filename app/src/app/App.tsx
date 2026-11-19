@@ -33,6 +33,7 @@ import { useSettings } from '../services/settings.js'
 import type { Attachment } from '../services/tree/types.js'
 import { MAX_ATTACHMENTS } from '../services/tree/types.js'
 import { useStore, BACKUP_LAST_KEY } from '../services/tree/store.js'
+import { canMerge } from '../services/tree/model.js'
 import { TreeView } from '../components/tree/TreeView.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import styles from './App.module.css'
@@ -80,6 +81,7 @@ export const App = () => {
   const removeRef = useStore((state) => state.removeRef)
   const reparent = useStore((state) => state.reparent)
   const refLink = useStore((state) => state.refLink)
+  const mergeCard = useStore((state) => state.mergeCard)
   const exportActive = useStore((state) => state.exportActive)
   const exportAll = useStore((state) => state.exportAll)
   const importFile = useStore((state) => state.importFile)
@@ -110,6 +112,8 @@ export const App = () => {
   const [editAnswer, setEditAnswer] = useState('')
   /** 长按某张卡片弹出的快捷菜单 */
   const [quickCardId, setQuickCardId] = useState<string | null>(null)
+  /** 合并选择器正在把哪张卡并出去（null = 没打开） */
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(() => {
     try {
       return localStorage.getItem(BACKUP_LAST_KEY)
@@ -231,6 +235,10 @@ export const App = () => {
         setEditTarget(null)
         return true
       }
+      if (mergeSourceId) {
+        setMergeSourceId(null)
+        return true
+      }
       if (refPickerOpen) {
         setRefPickerOpen(false)
         return true
@@ -264,6 +272,7 @@ export const App = () => {
     keyNeeded,
     quickCardId,
     editTarget,
+    mergeSourceId,
     refPickerOpen,
     renameOpen,
     overviewOpen,
@@ -380,6 +389,19 @@ export const App = () => {
   const quickCard = quickCardId
     ? project?.cards.find((item) => item.id === quickCardId) ?? null
     : null
+
+  /** 合并选择器的源卡（正在把这张并出去） */
+  const mergeSource = mergeSourceId
+    ? project?.cards.find((item) => item.id === mergeSourceId) ?? null
+    : null
+
+  /** 合并选择器里能选的目标卡：自己和祖先、子孙、生成中的卡都不能并 */
+  const mergeCandidates = useMemo(() => {
+    if (!project || !mergeSource) {
+      return []
+    }
+    return project.cards.filter((item) => canMerge(project, mergeSource.id, item.id))
+  }, [project, mergeSource])
 
   /** 选好文件：压缩图片 / 读文本，最多 MAX_ATTACHMENTS 个；失败的文件用 toast 说明 */
   const addDraftFiles = (files: File[]) => {
@@ -565,6 +587,7 @@ export const App = () => {
             onEditFollowUp={(followUpId) => openEdit(card.id, followUpId)}
             onShare={() => handleShareCard(card.id)}
             onContinue={() => continueCard(card.id)}
+            onMerge={() => setMergeSourceId(card.id)}
             onOpenRef={(refId) => openCard(refId)}
             onRemoveRef={(refId) => removeRef(card.id, refId)}
             onAddRef={() => setRefPickerOpen(true)}
@@ -728,6 +751,52 @@ export const App = () => {
           </div>
         ) : (
           <p className={styles.pickerEmpty}>没有可以引用的其它卡片了</p>
+        )}
+      </Sheet>
+
+      <Sheet
+        open={mergeSourceId !== null}
+        title="并入哪张卡片"
+        onClose={() => setMergeSourceId(null)}
+      >
+        {mergeSource ? (
+          <p className={styles.keyFine}>
+            把「{mergeSource.prompt}」并入你在下面点的那张卡片：
+            源卡片会被删掉，它的追问、子卡片和引用都会转到目标卡片上，两个回答会拼在一起。
+          </p>
+        ) : null}
+        {mergeCandidates.length ? (
+          <div className={styles.picker}>
+            {mergeCandidates.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={styles.pickerItem}
+                onClick={() => {
+                  if (!mergeSource) {
+                    return
+                  }
+                  const sourcePrompt = mergeSource.prompt
+                  const targetPrompt = item.prompt
+                  confirmAction(
+                    `把「${sourcePrompt}」并入「${targetPrompt}」？源卡片会被删掉，它的追问、子卡片和引用都会转到目标卡片上。`,
+                    () => {
+                      const ok = mergeCard(mergeSource.id, item.id)
+                      setMergeSourceId(null)
+                      showToast(ok ? '已并入' : '这两张卡片不能合并')
+                    },
+                  )
+                }}
+              >
+                <span className={styles.pickerText}>{item.prompt}</span>
+                {item.answer ? <span className={styles.pickerMeta}>已回答</span> : null}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.pickerEmpty}>
+            没有可以并入的其它卡片：自己、祖先和子孙不能并，正在生成的卡片也不行。
+          </p>
         )}
       </Sheet>
 
@@ -902,6 +971,18 @@ export const App = () => {
           >
             换角度重答
           </button>
+          {quickCard && project.cards.some((item) => canMerge(project, quickCard.id, item.id)) ? (
+            <button
+              type="button"
+              className={styles.quickItem}
+              onClick={() => {
+                setQuickCardId(null)
+                setMergeSourceId(quickCard.id)
+              }}
+            >
+              并入另一张卡…
+            </button>
+          ) : null}
           {quickCard?.status === 'partial' ? (
             <button
               type="button"

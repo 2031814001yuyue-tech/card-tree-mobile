@@ -570,6 +570,103 @@ export const reparentCard = (
 }
 
 /**
+ * 能不能把 sourceId 并入 targetId（UI 用来过滤选择器列表）。
+ * 拒绝：任一不存在 / 同一张 / 任一在生成中 / 互为祖先-子孙（先把树拆开再并）。
+ */
+export const canMerge = (project: Project, sourceId: string, targetId: string): boolean => {
+  const source = findCard(project, sourceId)
+  const target = findCard(project, targetId)
+  if (!source || !target || sourceId === targetId) {
+    return false
+  }
+  if (source.status === 'running' || target.status === 'running') {
+    return false
+  }
+  if (isDescendant(project, sourceId, targetId) || isDescendant(project, targetId, sourceId)) {
+    return false
+  }
+  return true
+}
+
+/**
+ * 合并：把 source 并入 target 后删除 source。
+ * - target 的 prompt 保留；source 的问法不同时，会以「另一个问法」小节拼进回答
+ * - 追问 / 附件 / 引用并入 target（引用去重截 MAX_REFS）；source 的子卡改挂 target 下
+ * - 其它卡里引用 source 的条目改为引用 target（已引用 target 的直接删掉这条避免重复）
+ * - source 的思考过程与搜索来源丢弃（target 的保留）；stats 不动（重答时自然刷新）
+ * 非法请求原样返回 project（store 可以先用 canMerge 过滤掉不可并的卡）。
+ */
+export const mergeCards = (project: Project, sourceId: string, targetId: string): Project => {
+  if (!canMerge(project, sourceId, targetId)) {
+    return project
+  }
+  const source = findCard(project, sourceId)
+  const target = findCard(project, targetId)
+  if (!source || !target) {
+    return project
+  }
+  const time = now()
+
+  const answerParts: string[] = []
+  if (target.answer.trim()) {
+    answerParts.push(target.answer.trimEnd())
+  }
+  if (source.answer.trim()) {
+    const sameQuestion = source.prompt.trim() === target.prompt.trim()
+    const head = sameQuestion ? '' : `**另一个问法：**${source.prompt.trim()}\n\n`
+    answerParts.push(`${head}${source.answer.trim()}`)
+  }
+  const answer = answerParts.join('\n\n---\n\n')
+
+  // 目标卡的引用列表：先清掉对源卡（马上要删）的引用，再并入源卡的引用
+  const mergedRefs: string[] = []
+  for (const refId of [...target.refs, ...source.refs]) {
+    if (refId === sourceId || refId === targetId || mergedRefs.includes(refId)) {
+      continue
+    }
+    mergedRefs.push(refId)
+  }
+
+  const merged: Card = {
+    ...target,
+    answer,
+    followUps: [...target.followUps, ...source.followUps],
+    attachments: [...target.attachments, ...source.attachments],
+    refs: mergedRefs.slice(0, MAX_REFS),
+    updatedAt: time,
+  }
+
+  const cards = project.cards
+    .filter((card) => card.id !== sourceId)
+    .map((card) => {
+      if (card.id === targetId) {
+        return merged
+      }
+      // source 的子卡改挂 target 下
+      if (card.parentId === sourceId) {
+        return { ...card, parentId: targetId, mode: 'child' as const, updatedAt: time }
+      }
+      // 其它卡引用 source 的改为引用 target；已引用 target 的删掉这条避免重复
+      if (card.refs.includes(sourceId)) {
+        const nextRefs: string[] = []
+        for (const refId of card.refs) {
+          if (refId === sourceId) {
+            if (targetId !== card.id && !nextRefs.includes(targetId)) {
+              nextRefs.push(targetId)
+            }
+            continue
+          }
+          nextRefs.push(refId)
+        }
+        return { ...card, refs: nextRefs, updatedAt: time }
+      }
+      return card
+    })
+
+  return { ...project, cards, updatedAt: time }
+}
+
+/**
  * 加一条引用。拒绝自引用 / 目标不存在 / 已达 MAX_REFS；已经连过（任一方向）也算连过，直接返回。
  * 引用是「这张卡在读别卡」，只往 card.refs 里加一条，不写反向。
  */

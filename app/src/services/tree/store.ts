@@ -93,6 +93,8 @@ export type Store = {
   reparent: (cardId: string, parentId: string | null) => boolean
   /** 全览图拉线：加一条引用，返回是否真的加了 */
   refLink: (cardId: string, refId: string) => boolean
+  /** 合并：把 sourceId 并入 targetId（源卡删除，追问/子卡/引用都转过去），返回是否真的并了 */
+  mergeCard: (sourceId: string, targetId: string) => boolean
   layout: () => void
 
   exportActive: () => void
@@ -639,6 +641,25 @@ export const useStore = create<Store>((set, get) => {
         return false
       }
       commit(() => next)
+      return true
+    },
+
+    mergeCard: (sourceId, targetId) => {
+      const project = activeProject(get())
+      if (!project || !model.canMerge(project, sourceId, targetId)) {
+        return false
+      }
+      const next = model.mergeCards(project, sourceId, targetId)
+      if (next === project) {
+        return false
+      }
+      const state = get()
+      const stillThere = next.cards.some((card) => card.id === sourceId)
+      commit(() => model.layoutCards(next))
+      // 源卡没了：如果正停在被并掉的那张卡上，回到树
+      if (!stillThere && state.activeCardId === sourceId) {
+        set({ view: 'tree', activeCardId: null })
+      }
       return true
     },
 

@@ -9,6 +9,7 @@ import { Button } from '../base/Button.js'
 import {
   IconChevronDownOutline14,
   IconCopyOutline16,
+  IconDataOutline16,
   IconDownloadOutline16,
   IconEditOutline16,
   IconLinkOutline14,
@@ -203,6 +204,8 @@ export type CardViewProps = {
   onShare: () => void
   /** 从中断处接着生成（仅 partial 卡片） */
   onContinue: () => void
+  /** 把这张卡并入另一张卡（源卡删除，追问/子卡/引用都转过去） */
+  onMerge: () => void
   onOpenRef: (cardId: string) => void
   onRemoveRef: (cardId: string) => void
   onAddRef: () => void
@@ -222,6 +225,7 @@ export const CardView = ({
   onEditFollowUp,
   onShare,
   onContinue,
+  onMerge,
   onOpenRef,
   onRemoveRef,
   onAddRef,
@@ -256,6 +260,7 @@ export const CardView = ({
       onClick: () => void handleCopy(answer),
       disabled: !answer,
     },
+    { label: '合并', icon: <IconDataOutline16 />, onClick: onMerge, disabled: running },
     { label: '删除', icon: <IconTrashOutline16 />, onClick: onDelete, danger: true, disabled: running },
   ]
 
