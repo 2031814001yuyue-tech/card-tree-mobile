@@ -4,6 +4,7 @@ import { CardView } from '../components/card/CardView.js'
 import { IconButton } from '../components/base/IconButton.js'
 import { Toast } from '../components/base/Toast.js'
 import {
+  IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconDataOutline16,
   IconMenuOutline20,
@@ -50,6 +51,18 @@ export const App = () => {
   const treeScrollRef = useRef(0)
   /** 流式生成时是否自动跟随：用户往回翻就停，重新滚到底部又恢复 */
   const followRef = useRef(true)
+  /** 用户手指正压在内容区上：这期间绝不程序化滚动（修"往上拖又被拉回底部"的跳页） */
+  const userTouchRef = useRef(false)
+  /** 最近看过的一张卡：树视图左滑回去 / 抽屉里回来时用 */
+  const lastCardIdRef = useRef<string | null>(null)
+
+  /** 同步浮动按钮的两个状态（在底部？内容超一屏？）；只在值变化时 setState */
+  const syncJumpState = (el: HTMLElement) => {
+    const nextBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    const nextOverflow = el.scrollHeight - el.clientHeight > 80
+    setAtBottom((current) => (current === nextBottom ? current : nextBottom))
+    setPageOverflow((current) => (current === nextOverflow ? current : nextOverflow))
+  }
 
   const ready = useStore((state) => state.ready)
   const projects = useStore((state) => state.projects)
@@ -132,6 +145,10 @@ export const App = () => {
   const [relayProviders, setRelayProviders] = useState<Record<string, boolean> | null>(null)
   /** 这次提问要不要先联网搜 */
   const [searchOn, setSearchOn] = useState(false)
+  /** 浮动跳转按钮：当前是否停在页面底部（决定箭头朝下还是朝上） */
+  const [atBottom, setAtBottom] = useState(true)
+  /** 页面内容是否超过一屏（没得滚就不显示浮动按钮） */
+  const [pageOverflow, setPageOverflow] = useState(false)
   /** APK 首次启动、当前订阅还没有 Key 时，强制先填一次 */
   const [keyNeeded, setKeyNeeded] = useState(() => {
     if (!isNativeApp()) {
@@ -179,6 +196,7 @@ export const App = () => {
     if (el && view === 'tree') {
       treeScrollRef.current = el.scrollTop
     }
+    lastCardIdRef.current = cardId
     openCard(cardId)
   }
 
@@ -194,31 +212,209 @@ export const App = () => {
       // 新卡片从顶部开始看，流式时默认继续跟随
       followRef.current = true
     }
+    syncJumpState(el)
   }, [view, activeCardId])
 
-  // 流式生成时自动跟随滚动：用户往回翻（离底部超过 120px）就停，
-  // 重新滚回底部附近自动恢复，不打断阅读
+  // 流式自动跟随（仿 DeepSeek 手机端）：
+  // - 用户手指在屏幕上时绝不自动滚动（Android WebView 的 scroll 事件是异步节流的，
+  //   只靠 scroll 事件判断"用户往上翻了"会慢半拍，出现"往上拖又被拉回底部"的跳页）
+  // - 手一松，离底 <120px 才算"愿意跟随"；往回翻过就停，滚回底部附近自动恢复
+  // 依赖 ready：hydrate 完成前 <main> 还没渲染、mainRef 是 null，监听必须在 ready 后挂
   useEffect(() => {
+    if (!ready) {
+      return
+    }
     const el = mainRef.current
     if (!el) {
       return
     }
     const onScroll = () => {
       followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+      syncJumpState(el)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
-  }, [])
+    const onResize = () => syncJumpState(el)
+    window.addEventListener('resize', onResize)
+    // 初始就同步一次：内容超一屏（树很长）时浮动按钮立即正确
+    syncJumpState(el)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [ready])
 
+  // 流式输出时自动跟随；内容长高也会让"停在半路"的页面重新判定浮动按钮方向
   useEffect(() => {
     const el = mainRef.current
-    if (!el || !live || view !== 'card') {
+    if (!el) {
       return
     }
-    if (followRef.current) {
+    if (live && view === 'card' && followRef.current && !userTouchRef.current) {
       el.scrollTop = el.scrollHeight
     }
+    syncJumpState(el)
   }, [live, view])
+
+  // 左右滑切换（仿手机 App 的层级手势）：
+  //   项目抽屉 ←[右滑] 树视图 [左滑]→ 卡片内容 [左滑]→ 全览
+  // 浮层开着的时候：右滑 = 关掉最上层浮层（和 Android 返回键同一套逻辑），左滑忽略
+  // 依赖 ready：mount 时 <main> 还没渲染，监听必须在 ready 后挂
+  useEffect(() => {
+    const el = mainRef.current
+    if (!ready || !el) {
+      return
+    }
+    let startX = 0
+    let startY = 0
+    let horizontal = false
+    let tracking = false
+    const overlayOpen =
+      drawerOpen ||
+      overviewOpen ||
+      settingsOpen ||
+      refPickerOpen ||
+      renameOpen ||
+      editTarget !== null ||
+      quickCardId !== null ||
+      mergeSourceId !== null ||
+      keyNeeded
+    const onTouchStart = (event: TouchEvent) => {
+      userTouchRef.current = true
+      if (event.touches.length !== 1) {
+        tracking = false
+        return
+      }
+      const touch = event.touches[0]
+      startX = touch.clientX
+      startY = touch.clientY
+      horizontal = false
+      tracking = true
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (!tracking || event.touches.length !== 1) {
+        return
+      }
+      const dx = event.touches[0].clientX - startX
+      const dy = event.touches[0].clientY - startY
+      if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+        horizontal = true
+      }
+      // 判定为水平滑动后压掉默认行为，避免同时触发纵向滚动
+      if (horizontal) {
+        event.preventDefault()
+      }
+    }
+    const onTouchEnd = (event: TouchEvent) => {
+      userTouchRef.current = false
+      if (!tracking) {
+        return
+      }
+      tracking = false
+      const touch = event.changedTouches[0]
+      if (!touch) {
+        return
+      }
+      const dx = touch.clientX - startX
+      const dy = touch.clientY - startY
+      if (!horizontal || Math.abs(dx) < 64 || Math.abs(dy) >= 48 || Math.abs(dy) * 1.5 > Math.abs(dx)) {
+        return
+      }
+      if (dx > 0) {
+        if (overlayOpen) {
+          window.__cardTreeBack?.()
+          return
+        }
+        if (view === 'card') {
+          useStore.getState().backToTree()
+        } else {
+          setDrawerOpen(true)
+        }
+        return
+      }
+      if (overlayOpen) {
+        return
+      }
+      if (view === 'card') {
+        setOverviewOpen(true)
+      } else if (lastCardIdRef.current) {
+        // 树视图左滑：回到最近看过的那张卡（不经 handleOpenCard，避免 effect 依赖函数）
+        const target = lastCardIdRef.current
+        if (el.scrollTop > 0) {
+          treeScrollRef.current = el.scrollTop
+        }
+        useStore.getState().openCard(target)
+      }
+    }
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [
+    ready,
+    view,
+    drawerOpen,
+    overviewOpen,
+    settingsOpen,
+    refPickerOpen,
+    renameOpen,
+    editTarget,
+    quickCardId,
+    mergeSourceId,
+    keyNeeded,
+  ])
+
+  // 项目抽屉打开时，在抽屉面板上右滑关抽屉（main 被遮罩盖住收不到事件，所以单独挂 window）
+  useEffect(() => {
+    if (!drawerOpen) {
+      return
+    }
+    let startX = 0
+    let tracking = false
+    let horizontal = false
+    const onTouchStart = (event: TouchEvent) => {
+      tracking = event.touches.length === 1
+      horizontal = false
+      if (tracking) {
+        startX = event.touches[0].clientX
+      }
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (!tracking || event.touches.length !== 1) {
+        return
+      }
+      const dx = event.touches[0].clientX - startX
+      if (!horizontal && Math.abs(dx) > 12) {
+        horizontal = true
+      }
+    }
+    const onTouchEnd = (event: TouchEvent) => {
+      if (!tracking) {
+        return
+      }
+      tracking = false
+      const touch = event.changedTouches[0]
+      if (!touch || !horizontal) {
+        return
+      }
+      if (touch.clientX - startX > 64) {
+        setDrawerOpen(false)
+      }
+    }
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('touchend', onTouchEnd)
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [drawerOpen])
 
   // 给 Android 返回键用：先关浮层，再回树，都不满足就交给系统退出
   useEffect(() => {
@@ -603,6 +799,40 @@ export const App = () => {
           />
         )}
       </main>
+
+      {pageOverflow &&
+      !drawerOpen &&
+      !overviewOpen &&
+      !settingsOpen &&
+      !refPickerOpen &&
+      !renameOpen &&
+      !editTarget &&
+      !quickCardId &&
+      !mergeSourceId &&
+      !keyNeeded ? (
+        <button
+          type="button"
+          className={styles.jumpButton}
+          aria-label={atBottom ? '回到顶部' : '跳到底部'}
+          onClick={() => {
+            const el = mainRef.current
+            if (!el) {
+              return
+            }
+            if (atBottom) {
+              el.scrollTo({ top: 0 })
+              followRef.current = false
+            } else {
+              el.scrollTo({ top: el.scrollHeight })
+              followRef.current = true
+            }
+          }}
+        >
+          <span className={clsx(atBottom && styles.jumpIconUp)}>
+            <IconChevronDownOutline14 />
+          </span>
+        </button>
+      ) : null}
 
       <footer className={styles.footer}>
         {view === 'card' && card ? (

@@ -7,4 +7,6 @@ export type LiveText = {
   answer: string
   /** 累计思考过程 */
   thinking: string
+  /** 联网搜索正在进行（UI 显示「正在搜索…」；搜完开始流式时自动消失） */
+  searching?: boolean
 }

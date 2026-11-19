@@ -187,6 +187,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | **镜像回退（0.3.6）** | 本地双 HttpServer 扮演直连源与镜像源：配好镜像时 `install` 全程走镜像装包成功（LOG 无回退）；镜像指向无人监听端口时自动报「镜像下载失败，改用直连」并回退直连成功；空镜像直连回归正常。手写 STORED zip 验证了解压路径（教训：单文件 zip 的 CRC 必须真算） |
 | 0.3.6 新交互 | CDP 文本 dump 验证：卡片操作行六 chip（含「分享」）、追问右下「编辑」、分享 toast、模型菜单「能看图 · 上下文 1M」（读自真实 `/models` 的 `limit.context` 字段——注意不是 `context_window`）、「导出全部项目」按钮、「下载镜像」输入框（见 `docs/preview/34–37`） |
 | **卡片合并（0.3.7，纯网页层）** | CDP 端到端三链路全验：卡片操作行「合并」chip 与长按菜单「并入另一张卡…」两个入口都真跑——IndexedDB 逐项核对源卡删除、追问转移、子卡改挂目标卡、引用去重合并、其它卡对源卡的引用改指目标卡；合并后正看源卡自动回树。**顺带修真 bug**：长按抬手的合成 click 会落在刚打开浮层的遮罩上把菜单立刻关掉（Sheet 加 350ms 打开宽容期，`Input.dispatchTouchEvent` hold 700ms 复现验证） |
+| **流式跟随 / 浮动按钮 / 左右滑（0.3.8，纯网页层）** | CDP 全验：滚动后跳底钮出现、两态切换（跳底 atBottomGap:0 / 跳顶 top:0）、树右滑开抽屉、抽屉右滑关、卡右滑回树、树左滑回最近卡、卡左滑开全览、按住期间流式不拉走滚动位置；追问区的「正在搜索…」350ms 可见、搜索结束消失。**顺带修真 bug**：0.3.5 起的跟随拉回底部（scroll/resize 监听挂在 `ready=false` 时刻从未生效——`mainRef.current=null` 时挂了个空；0.3.8 改为 `ready` 后挂并加 `userTouchRef` 按住即停）。**测试坑**：CDP touch 起点 x<80 会触发 Chrome 历史导航手势把页面导走，起点要 ≥100 |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 

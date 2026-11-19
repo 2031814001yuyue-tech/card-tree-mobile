@@ -193,6 +193,33 @@
   padding: 6px 0;
 }
 
+/* 联网搜索进行中：比 typing 三点更具体的一行状态 */
+.searching {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--ct-surface-sunken);
+  color: var(--ct-ink-soft);
+  font-size: 12.5px;
+}
+
+.searching svg {
+  width: 14px;
+  height: 14px;
+  animation: search-spin 1.6s infinite linear;
+}
+
+@keyframes search-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .typing span {
   width: 6px;
   height: 6px;

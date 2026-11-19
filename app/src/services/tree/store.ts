@@ -210,7 +210,8 @@ export const useStore = create<Store>((set, get) => {
     const question = String(followUp ? followUp.prompt : card.prompt).trim()
     if (options?.search && question) {
       controller = null
-      set({ running: { cardId, followUpId }, live: { cardId, followUpId, answer: '', thinking: '' } })
+      // searching:true 让卡片先显示「正在搜索…」，来源落卡后开始流式时自然消失
+      set({ running: { cardId, followUpId }, live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
       try {
         const outcome = await searchWeb(normalizeApiBase(settings.apiBase), question)
         searchResult = { query: outcome.query, sources: outcome.sources, searchedAt: Date.now() }

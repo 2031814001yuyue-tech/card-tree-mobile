@@ -304,6 +304,11 @@ export const CardView = ({
               cacheKey={`${card.id}:answer`}
               disableLink={false}
             />
+          ) : mainLive?.searching ? (
+            <p className={styles.searching}>
+              <IconSearchOutline16 />
+              正在搜索…
+            </p>
           ) : status === 'running' ? (
             <div className={styles.typing} aria-label="正在生成">
               <span />
@@ -397,6 +402,11 @@ export const CardView = ({
                       cacheKey={`${card.id}:${followUp.id}`}
                       disableLink={false}
                     />
+                  ) : followLive?.searching ? (
+                    <p className={styles.searching}>
+                      <IconSearchOutline16 />
+                      正在搜索…
+                    </p>
                   ) : followUp.status === 'running' ? (
                     <div className={styles.typing}>
                       <span />
