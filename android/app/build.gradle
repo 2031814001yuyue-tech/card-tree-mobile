@@ -28,8 +28,8 @@ android {
         applicationId 'com.cardtree.mobile'
         minSdk 26
         targetSdk 34
-        versionCode 8
-        versionName '0.3.5'
+        versionCode 9
+        versionName '0.3.6'
     }
 
     // 只在 arm64 / armv7 上体积更小：网页资源占大头，dex 很小，这里不用拆

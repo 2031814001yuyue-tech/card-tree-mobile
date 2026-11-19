@@ -331,6 +331,119 @@ public final class NativeBridge {
                 + ok + ", " + quote(message) + ")");
     }
 
+    /** 设置热更新下载镜像前缀（空 = 直连）：记住在设置里，下次启动仍生效。 */
+    @JavascriptInterface
+    public void setUpdateMirror(String prefix) {
+        String value = prefix == null ? "" : prefix.trim();
+        updater.setMirror(value);
+        activity.saveUpdateMirror(value);
+    }
+
+    @JavascriptInterface
+    public String getUpdateMirror() {
+        return updater.mirror();
+    }
+
+    /**
+     * 把网页生成的长图 PNG（dataURL，形如 {@code data:image/png;base64,…}）
+     * 存进「下载/CardTree」。返回落点描述（如 {@code CardTree/card-….png}），
+     * 格式不对 / 写入失败返回 null。
+     */
+    @JavascriptInterface
+    public String saveImage(String dataUrl, String name) {
+        if (dataUrl == null || !dataUrl.startsWith("data:image/")) {
+            return null;
+        }
+        int comma = dataUrl.indexOf(',');
+        if (comma <= "data:image/".length()) {
+            return null;
+        }
+        String mime = dataUrl.substring("data:".length(), comma); // image/png 等
+        String extension;
+        if ("image/png".equals(mime)) {
+            extension = ".png";
+        } else if ("image/jpeg".equals(mime)) {
+            extension = ".jpg";
+        } else if ("image/webp".equals(mime)) {
+            extension = ".webp";
+        } else {
+            return null; // 只收三种常见格式，别的当不认识
+        }
+        byte[] data;
+        try {
+            data = java.util.Base64.getDecoder().decode(dataUrl.substring(comma + 1));
+        } catch (IllegalArgumentException error) {
+            return null;
+        }
+        String safeName = name == null ? "" : name.trim();
+        if (safeName.isEmpty()) {
+            safeName = "card";
+        }
+        // 名字里只留字母数字与横杠点，避免拼进文件系统出问题
+        safeName = safeName.replaceAll("[^A-Za-z0-9._-]", "-");
+        if (safeName.length() > 24) {
+            safeName = safeName.substring(0, 24);
+        }
+        String fileName = "card-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+                .format(new Date()) + "-" + safeName + extension;
+        try {
+            return Build.VERSION.SDK_INT >= 29
+                    ? saveImageMediaStore(fileName, data, mime)
+                    : saveImageLegacy(fileName, data);
+        } catch (Exception error) {
+            return null;
+        }
+    }
+
+    /** Android 10+：MediaStore.Downloads 的 CardTree/ 目录。 */
+    private String saveImageMediaStore(String fileName, byte[] data, String mime) throws IOException {
+        ContentResolver resolver = activity.getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        values.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                Environment.DIRECTORY_DOWNLOADS + "/CardTree");
+        values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) {
+            return null;
+        }
+        boolean ok = false;
+        try {
+            try (OutputStream out = resolver.openOutputStream(uri)) {
+                if (out == null) {
+                    return null;
+                }
+                out.write(data);
+            }
+            ContentValues done = new ContentValues();
+            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            resolver.update(uri, done, null, null);
+            ok = true;
+        } finally {
+            if (!ok) {
+                resolver.delete(uri, null, null);
+            }
+        }
+        return "下载/CardTree/" + fileName;
+    }
+
+    /** Android 9 及以下：app 私有 Documents/CardTree/ 目录。 */
+    private String saveImageLegacy(String fileName, byte[] data) throws IOException {
+        File base = activity.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+        if (base == null) {
+            return null;
+        }
+        File dir = new File(base, "CardTree");
+        if (!dir.exists() && !dir.mkdirs()) {
+            return null;
+        }
+        try (FileOutputStream out = new FileOutputStream(new File(dir, fileName))) {
+            out.write(data);
+        }
+        return dir.getName() + "/" + fileName;
+    }
+
     private static String quote(String value) {
         return "\"" + WebUpdater.jsonEscape(value) + "\"";
     }

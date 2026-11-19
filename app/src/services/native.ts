@@ -28,6 +28,11 @@ export interface CardTreeNativeBridge {
   checkWebUpdate(): string
   /** 开始后台安装更新，已在装时返回 false；进度 / 结束走回调 */
   installWebUpdate(): boolean
+  /** 把 PNG dataURL 存进 下载/CardTree（分享长图用）；旧壳没有时返回 null */
+  saveImage?(dataUrl: string, name: string): string | null
+  /** 设置 / 读取热更新下载镜像前缀（0.3.6 起） */
+  setUpdateMirror?(prefix: string): void
+  getUpdateMirror?(): string
 }
 
 declare global {
@@ -195,5 +200,43 @@ export const installNativeWebUpdate = (): boolean => {
     return nativeBridge()?.installWebUpdate() === true
   } catch {
     return false
+  }
+}
+
+/**
+ * 把长图 PNG 交给原生保存（下载目录）；旧壳没有这个方法时返回 null，
+ * 调用方回退成浏览器下载。
+ */
+export const saveNativeImage = (dataUrl: string, name: string): string | null => {
+  try {
+    const bridge = nativeBridge()
+    if (!bridge || typeof bridge.saveImage !== 'function') {
+      return null
+    }
+    return bridge.saveImage(dataUrl, name) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** 热更新下载镜像前缀（如 `https://ghproxy.net/`）；没配 / 旧壳返回空串 */
+export const nativeUpdateMirror = (): string => {
+  try {
+    const bridge = nativeBridge()
+    if (!bridge || typeof bridge.getUpdateMirror !== 'function') {
+      return ''
+    }
+    return bridge.getUpdateMirror() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 设置热更新下载镜像前缀；空串表示直连 GitHub */
+export const setNativeUpdateMirror = (prefix: string): void => {
+  try {
+    nativeBridge()?.setUpdateMirror?.(prefix.trim())
+  } catch {
+    // 失败不阻塞：下一次保存再试
   }
 }

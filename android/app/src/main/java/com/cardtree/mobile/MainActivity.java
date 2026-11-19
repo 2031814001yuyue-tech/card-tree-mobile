@@ -38,7 +38,7 @@ import java.util.UUID;
  */
 public final class MainActivity extends Activity {
 
-    public static final String APP_VERSION = "0.3.5";
+    public static final String APP_VERSION = "0.3.6";
 
     /** 网页层热更新从这个仓库的 GitHub Releases 拿（tag 形如 web-v0.3.5，附带 web.zip + 哈希）。 */
     private static final String UPDATE_REPO = "2031814001yuyue-tech/card-tree-mobile";
@@ -47,6 +47,7 @@ public final class MainActivity extends Activity {
     private static final String PREFS = "card_tree_mobile";
     private static final String SESSION_FIELD = "session_id";
     private static final String PORT_FIELD = "local_port";
+    private static final String MIRROR_FIELD = "update_mirror";
 
     private WebView web;
     private LocalServer server;
@@ -77,6 +78,8 @@ public final class MainActivity extends Activity {
         providerVaults.put("kimi", kimiVault);
         providerVaults.put("deepseek", searchVault);
         updater = new WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION);
+        // 上次设置的下载镜像（国内直连 GitHub 拉不动时走加速前缀）
+        updater.setMirror(getSharedPreferences(PREFS, MODE_PRIVATE).getString(MIRROR_FIELD, ""));
         web = new WebView(this);
         web.setBackgroundColor(getResources().getColor(R.color.paper, getTheme()));
         configure(web, providerVaults);
@@ -265,6 +268,14 @@ public final class MainActivity extends Activity {
         }, "card-tree-update-check");
         check.setDaemon(true);
         check.start();
+    }
+
+    /** 给 NativeBridge 用：记住热更新下载镜像前缀（空 = 直连）。 */
+    void saveUpdateMirror(String prefix) {
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(MIRROR_FIELD, prefix == null ? "" : prefix)
+                .apply();
     }
 
     void showToast(String text) {

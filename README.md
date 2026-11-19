@@ -47,18 +47,22 @@
 | ![检查更新](docs/preview/28-update-available.png) |
 
 | 四家订阅随时切换（连接节跟随显示） | 树分支折叠 | 界面风格：羊皮纸 / 石墨 / 素笺 |
-| --- | --- | --- |
-| ![订阅与模型](docs/preview/29-providers.png) | ![收起分支](docs/preview/30-fold.png) | ![羊皮纸](docs/preview/31-style-parchment.png) ![石墨](docs/preview/32-style-graphite.png) ![素笺](docs/preview/33-style-plain.png) |
+| --- | --- | --- | --- |
+| ![订阅与模型](docs/preview/29-providers.png) | ![收起分支](docs/preview/30-fold.png) | ![羊皮纸](docs/preview/31-style-parchment.png) | ![石墨](docs/preview/32-style-graphite.png) ![素笺](docs/preview/33-style-plain.png) |
+
+| 卡片操作行多了「分享」；追问右下可编辑 | 分享长图保存的 toast | 模型列表标注「能看图 / 上下文」 | 数据节「导出全部项目」 |
+| --- | --- | --- | --- |
+| ![卡片操作](docs/preview/34-card-actions.png) | ![分享](docs/preview/35-share-toast.png) | ![模型标注](docs/preview/36-model-hints.png) | ![导出全部](docs/preview/37-export-all.png) |
 
 ## 功能
 
 **卡片树核心（对齐桌面版主体功能）**
 
 - 树视图：缩进 + 分支竖线、模式徽章、提问单行省略、回答两行预览；顶部**搜索框**按关键词过滤卡片（命中的卡片和它的祖先链保留，树的形状不变）
-- **长按卡片**弹出快捷菜单：打开 / 编辑文字 / 引用一张卡片 / 换角度重答 / 继续生成 / 删除
+- **长按卡片**弹出快捷菜单：打开 / 编辑文字 / 引用一张卡片 / 换角度重答 / 继续生成 / 分享成长图 / 删除
 - 四种生长方式：**追问**（同一张卡继续问）/ **深入**（长出子卡片）/ **发散**（同层开新支线）/ **独立**（不与树相连）
 - **分支重答**：回到同一张卡的问题，换一个角度重新作答
-- 卡片详情：Markdown + KaTeX 公式 + 代码高亮、可折叠的思考过程、流式打字；**可以直接编辑问题或回答的文字**（不重新调用模型）
+- 卡片详情：Markdown + KaTeX 公式 + 代码高亮、可折叠的思考过程、流式打字；**可以直接编辑问题或回答的文字**（不重新调用模型），追问也能编辑（右下角「编辑」）
 - **中断后继续生成**：回答流到一半被中断（比如切走网络断了），已经写出的内容留在卡片上，点「继续生成」从中断处接着写，不用重问一遍
 - **项目背景与规则**：给每个项目写一段 system（比如「用高中生能懂的语言解释」），拼进这个项目里每次提问的最前面
 - **上下文预算**：按「根 → 父级」链 + 被引用卡片自动装配，超预算时先折叠再丢弃，卡片底部显示 `上下文 ≈x / y tokens · 折叠 n / 丢弃 n / 引用 n`
@@ -68,6 +72,11 @@
 - 多项目：新建 / 切换 / 重命名 / 删除；导入桌面版导出的 `state.json`；导出 / 导入本应用备份
 - **自动备份（APK）**：数据一有改动就记一笔，退到后台或每 5 分钟往「下载 / CardTree / backups」写一份，滚动保留最近 30 份；也可以随时点「立即备份」
 - **四家订阅随时切换（0.3.5 起）**：设置 → 订阅与模型，在 opencode go / 智谱 Coding / Kimi Coding / DeepSeek 官方之间一键切换；每家记忆自己的模型和推理强度，切回来还是原来那个（详见下方「多订阅」）
+- **模型能力标注（0.3.6 起）**：模型列表里每个模型下方标注「能看图 / 上下文 1M」这类小字（读自各家 `/models` 的 `modalities` 和 `limit` 字段），选模型不再盲选
+- **追问文字也能编辑（0.3.6 起）**：追问右下角有「编辑」按钮，和卡片编辑一样只改文字不重跑模型
+- **单卡分享长图（0.3.6 起）**：卡片操作行「分享」把问题 + 回答 + 参考来源渲染成一张 720px 宽的长图（纯 canvas，跟随当前深浅色），APK 里存到「下载/CardTree」，可直接发微信
+- **导出全部项目（0.3.6 起）**：设置 → 数据 →「导出全部项目」，一次导出所有项目的 JSON；格式与桌面版 `state.json` 同构，桌面版也能读回
+- **热更新下载镜像（0.3.6 起）**：设置 → 关于 →「下载镜像（可选）」，填一个加速前缀（如 `https://ghproxy.net/`），更新包先走它；留空直连，镜像失败自动回直连重试一次
 - **四种界面风格（0.3.5 起）**：索引卡（默认）/ 素笺 / 羊皮纸 / 石墨，风格与深浅主题可任意组合（详见下方「界面风格」）
 - **流式自动跟随**：回答流式生成时页面自动往下滚；往回翻就停（不打扰你重读），再滚回底部自动恢复跟随
 - **树分支可折叠**：有子卡片的地方出现「收起分支」，折叠后显示「N 张子卡片」，点击展开；折叠状态记在本地
@@ -160,7 +169,7 @@
 |  | **Android APK** | **网页 / PWA** |
 | --- | --- | --- | --- |
 | 需要电脑吗 | 装好之后**不需要**（只有 API Key 要在首次启动时粘一次） | 每次用都要开着电脑上的中继 `node server.mjs` |
-| 怎么装 | 把 `dist/card-tree-mobile-0.3.5.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
+| 怎么装 | 把 `dist/card-tree-mobile-0.3.6.apk` 传到手机，点开安装 | 手机浏览器打开 `https://<电脑IP>:8787`，可「添加到主屏幕」 |
 | Key 存在哪 | 手机上（Android Keystore 加密） | 电脑上（`~/.dsh/.credentials.yaml`，手机不留 Key） |
 | 数据存在哪 | App 自己的本地存储 | 浏览器 IndexedDB |
 | 适合 | 随身当独立 App 用 | 想用浏览器 / iPhone / 不想装 APK |
@@ -169,9 +178,9 @@
 
 ## Android APK（不依赖电脑）
 
-产物：[`dist/card-tree-mobile-0.3.5.apk`](dist/card-tree-mobile-0.3.5.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
+产物：[`dist/card-tree-mobile-0.3.6.apk`](dist/card-tree-mobile-0.3.6.apk)（约 1.9 MB，**release 签名**，可以直接侧载）。签名用的 keystore 在 `android/app/card-tree-release.jks`，密码写在 `android/keystore.properties`（两者都已 git 忽略）——**请把这两份文件留好**，以后发新版本要用同一把钥匙签名，否则手机上会变成两个不同的 App（升级装不上、数据也不接续）。
 
-> 之前装过 0.3.2–0.3.4 的：0.3.5 的 Java 壳变了（多订阅的原生桥方法），**需要重新安装一次 APK**；装完之后界面 / 功能的更新又都走热更新，不用再重装。
+> 之前装过 0.3.2–0.3.5 的：0.3.6 的 Java 壳变了（新增保存长图、下载镜像两个原生桥方法），**需要重新安装一次 APK**；装完之后界面 / 功能的更新又都走热更新，不用再重装。
 
 **安装**
 
@@ -198,6 +207,7 @@ APK 里打包了一个只监听 `127.0.0.1` 的本地 HTTP 服务（纯 Java，�
 
 - **App 启动 4 秒后自动查一次**，有新版弹 toast；也可以「设置 → 关于 → 检查更新」手动查
 - 下载 → sha256 校验 → 解压到 App 私有目录 → 原子切换，成功后页面自动刷新，**不用重装 APK、不加任何权限**
+- **下载镜像（0.3.6 起）**：GitHub 的文件 CDN 国内偶尔拉不动，设置 → 关于 →「下载镜像（可选）」填加速前缀（如 `https://ghproxy.net/`），更新包先走镜像；留空直连；**镜像下载失败会自动改回直连重试一次**，不会卡死在半路
 - **永远不会变砖**：内置在 APK `assets/www` 里的那一份永远保留，下载 / 校验失败就继续用内置版；想回到内置版，清一次 App 数据即可
 - 想自己发新版：改完代码后 `cd app && pnpm build && node scripts/publish-web.mjs --notes "这次改了什么"`（需要 [gh](https://cli.github.com/) 登录），脚本会把 `dist/` 打成 `web.zip`、算好 sha256、发一个 `web-v<版本>` 的 Release
 - 仓库必须是 **public**：App 是匿名读 Releases 的，private 仓库会 404
@@ -220,16 +230,18 @@ cd ../android
 
 **已经验到什么程度**
 
-- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 8 / versionName 0.3.5、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
+- `aapt2 dump badging`：包名 `com.cardtree.mobile`、versionCode 9 / versionName 0.3.6、minSdk 26、targetSdk 34、`INTERNET` 权限、图标 / 中文名正常
 - `apksigner verify`：release APK 用 `card-tree-mobile` 自己的 keystore 签名（v2），证书 DN `CN=CardTree Mobile`，不是 debug 证书
 - APK 里 156 个网页资源齐全（index.html、manifest、icon 180/192/512、单个 hash 化的 js/css），端口固定、自动备份与四家路由的 Java 代码都在包里
 - **热更新器全链路验过**：真实 GitHub API 检查（同版本返回「无更新」、旧版本能查到 `web-v0.3.4`）；用本地服务器扮演 GitHub 完整跑了一遍「下载 → sha256 校验 → 解压 156 个文件 → 原子切换 → LocalServer 从新目录发页面」，坏 sha256 被正确拒绝且不污染现有目录（详见 `docs/ANDROID.md`）
+- **镜像回退验过（0.3.6）**：本地双服务器扮演「直连源 + 镜像源」——配好镜像时全程走镜像装包成功；镜像不可达时自动报「镜像下载失败，改用直连」并回退成功；空镜像直连回归正常
 - 把同一份 `LocalServer` 拿到桌面 JVM 上真跑了一遍：静态资源 / SPA 回退 / 404 / `/api/health`（含 `search:true`）/ `/api/models`（42 KB、32 个模型）/ `/api/chat/completions` 真实 SSE（29 个 chunk、首块 1ms、27 条 `data:` 事件）/ **`/api/deepseek/search` 真实搜索（200、771ms，返回 中国天气网 / 钱江晚报 两条真实结果）**
 - **四家订阅路由冒烟（0.3.5）**：中继上 `GET /api/models` 带 `x-card-tree-provider` 四家全 200；kimi / deepseek / opencode 流式对话真跑通（31 / 17 / 8 chunks）；智谱返回 429「套餐已到期」原样透传；未知头 400 `provider_unknown`；设置页「连接」节随当前订阅显示（假桥注入 CDP 验证）
 - 新增交互（搜索、长按菜单、编辑、继续生成、项目背景、自动备份入口、订阅 pills、风格 pills、折叠分支）用 Chrome CDP 在 390×844 视口逐屏截图验过，见上方截图
 - **附件端到端验过**：在 390×844 视口里用真实文件选择框塞进一个 txt + 一张图，选 `claude-haiku-5-5` 提问，模型正确答出文本里的型号（X-200）和图片里的数字（42）；两个附件都落进了 IndexedDB
 - **联网搜索端到端验过**：在 390×844 视口里点亮「联网搜索」问「杭州今天天气怎么样？」，真实搜到 5 条来源（中国天气网 / 墨迹 / 东方天气…），回答里带 `[1]–[5]` 引用，卡片底部来源列表可点；搜索摘要确实进了模型上下文（思考过程里能看到 5 条资料）
-- **没有在真机或模拟器上跑过**：这台机器没有硬件虚拟化，开不了 Android 模拟器。装到手机上如果遇到问题，把现象发回来即可
+- **0.3.6 新交互 CDP 验过**：卡片操作行六个 chip（含「分享」）、追问右下「编辑」按钮、分享 toast、模型菜单「能看图 · 上下文 1M」标注（读自真实 `/models` 的 `limit.context` 字段）、「导出全部项目」按钮、「下载镜像」输入框，见上方截图
+- **没有在真机或模拟器上跑过**：这台机器没有硬件虚拟化，开不了 Android 模拟器。装到手机上照着 [`docs/DEVICE-CHECK.md`](docs/DEVICE-CHECK.md) 的 20 条清单走一遍（约 10 分钟），哪条不对发回来即可定位
 
 要改代码 / 自己构建，看 [`docs/ANDROID.md`](docs/ANDROID.md)（架构、文件分工、构建、验证记录、常见问题）。
 
@@ -333,8 +345,8 @@ card-tree-mobile/
 │  │  ├─ WebUpdater.java        热更新器：查 GitHub Releases → 下载 → sha256 校验 → 解压 → 原子切换
 │  │  └─ NativeBridge.java      注入给网页的 window.CardTreeNative（含 saveAutoBackup 自动备份与热更新三个方法）
 │  └─ app/src/main/assets/www/  构建时从 app/dist 复制进来（git 忽略）
-├─ dist/                        打包好的安装包：card-tree-mobile-0.3.5.apk
-└─ docs/                        FEASIBILITY.md（可行性 + M0–M5 计划）、DESIGN.md（视觉语言）、ANDROID.md（APK 架构与构建）、RELAY.md（中继细节）、preview/（截图）
+├─ dist/                        打包好的安装包：card-tree-mobile-0.3.6.apk
+└─ docs/                        FEASIBILITY.md（可行性 + M0–M5 计划）、DESIGN.md（视觉语言）、ANDROID.md（APK 架构与构建）、RELAY.md（中继细节）、DEVICE-CHECK.md（真机走查清单）、preview/（截图）
 ```
 
 ## 数据存在哪
@@ -344,7 +356,7 @@ card-tree-mobile/
 - 联网搜索的来源（标题 / 摘要 / 链接）随卡片一起存在 IndexedDB 的 `card.search` 里，导出 / 自动备份会带上
 - **Key 分开存**：四家订阅每家一把（DeepSeek 官方与联网搜索共用一把）。APK 里都在手机上（Android Keystore 加密，设置 → 连接跟随当前订阅）；网页版都在电脑上（`~/.dsh/.credentials.yaml` 或环境变量），手机不留
 - **APK 自动备份**：数据有改动后，退到后台或每 5 分钟写一份到手机的「下载 / CardTree / backups」，滚动保留最近 30 份；设置面板「数据 → 自动备份」里能看到上次时间、也能点「立即备份」
-- 换设备 / 备份：设置面板 →「导出当前项目」「导入备份」
+- 换设备 / 备份：设置面板 →「导出当前项目」（单个）或「导出全部项目」（0.3.6 起，桌面版 `state.json` 同构、可直接读回）、「导入备份」
 - 从桌面版迁移：设置面板 →「导入备份」直接选 `~/.dsh/card-tree/state.json`，会把里面每个项目拆成独立项目导入（运行中的卡片会标为可重试的错误态）
 
 ## 已知限制
@@ -360,9 +372,9 @@ card-tree-mobile/
 9. 数据默认只在当前设备：网页版清缓存就没了；APK 卸载会删掉应用内数据，但「下载 / CardTree / backups」里的自动备份文件还在，重装后可以导入恢复。重要内容仍建议手动导出。
 10. 全览图能拖卡片改上级、拉引用线（包括把根卡片重新挂到别的卡片下面），但不能手动摆节点位置（位置自动排布）；在手机上节点可能缩得比较小，按偏一点也会抓住最近的卡片。
 11. 无本地工具（读文件 / 抓网页）、无语音；附件与联网搜索都已支持——但联网搜索要**单独配一把 DeepSeek API Key**，而且按搜索次数计费（每次提问搜 5 条），不用时把开关关掉即可。
-12. **热更新的下载走 GitHub 的文件 CDN**：国内网络偶尔拉不动 `objects.githubusercontent.com`（本机试过一次 1.8 MB 下了十几分钟）。拉不动时 App 会留在当前版本、下次再试，不影响使用；网络好的时候（或挂代理）秒下。检查更新本身走 `api.github.com`，在实测网络下一直正常。
+12. **热更新的下载走 GitHub 的文件 CDN**：国内网络偶尔拉不动 `objects.githubusercontent.com`（本机试过一次 1.8 MB 下了十几分钟）。0.3.6 起可以在「设置 → 关于 → 下载镜像」里填加速前缀（如 `https://ghproxy.net/`），镜像失败自动回直连；拉不动时 App 会留在当前版本、下次再试，不影响使用。检查更新本身走 `api.github.com`，在实测网络下一直正常。
 13. **四家订阅是「包月编码套餐」的路子**：智谱 Coding 的套餐会过期（本机实测返回 429「您的 GLM Coding Plan 套餐已到期」），过期后上游错误原样透传，续订即恢复；Kimi / opencode go 的套餐同理。模型列表和默认模型以各家 `/models` 返回为准。
-14. 0.3.5 的 Java 壳改了（多订阅原生桥），**从 0.3.2–0.3.4 升上来要重新装一次 APK**；之后纯网页层的改动又都走热更新，不用再重装。
+14. Java 壳在 0.3.3（多订阅）、0.3.5（多订阅桥）和 **0.3.6（保存长图 + 下载镜像桥）** 都改过，从更早版本升上来要**重新装一次 APK**；之后纯网页层的改动又都走热更新，不用再重装。
 
 ## 技术栈
 

@@ -287,6 +287,40 @@ export const updateCard = (
   return { ...replaceCard(project, card.id, next), updatedAt: next.updatedAt }
 }
 
+/**
+ * 手动改追问文字（问题 / 回答）。只改文本，不重新生成、不改状态。
+ * 问题为空时抛错；卡片或追问不存在时原样返回。
+ */
+export const updateFollowUp = (
+  project: Project,
+  cardId: string,
+  followUpId: string,
+  patch: { prompt?: string; answer?: string },
+): Project => {
+  const card = findCard(project, cardId)
+  const followUp = card?.followUps.find((item) => item.id === followUpId)
+  if (!card || !followUp) {
+    return project
+  }
+  const next: FollowUp = { ...followUp }
+  if (typeof patch.prompt === 'string') {
+    const prompt = patch.prompt.trim()
+    if (!prompt) {
+      throw new Error('问题不能为空')
+    }
+    next.prompt = prompt
+  }
+  if (typeof patch.answer === 'string') {
+    next.answer = patch.answer
+  }
+  next.updatedAt = now()
+  const nextCard: Card = {
+    ...card,
+    followUps: card.followUps.map((item) => (item.id === followUpId ? next : item)),
+  }
+  return { ...replaceCard(project, cardId, nextCard), updatedAt: next.updatedAt }
+}
+
 /** 联网搜索结果整理：过滤空来源、限条数、裁剪文本（读存档 / 新建时都用它） */
 export const normalizeSearch = (value?: CardSearch | null): CardSearch | null => {
   if (!value || !Array.isArray(value.sources) || value.sources.length === 0) {

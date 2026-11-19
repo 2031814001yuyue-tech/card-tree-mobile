@@ -13,11 +13,13 @@ import {
   nativeHasProviderKey,
   nativeHasSearchKey,
   nativeSupportsProviders,
+  nativeUpdateMirror,
   nativeVersion,
   nativeWebVersion,
   saveNativeKey,
   saveNativeProviderKey,
   saveNativeSearchKey,
+  setNativeUpdateMirror,
 } from '../../services/native.js'
 import {
   setUpdateState,
@@ -93,6 +95,8 @@ export type SettingsSheetProps = {
   modelsError: string | null
   onReloadModels: () => void
   onExportProject: () => void
+  /** 导出全部项目（一个文件，含桌面版同构字段，手机/桌面都读得回） */
+  onExportAll: () => void
   onImportFile: (file: File) => void
   onClearAll: () => void
   /** 最近一次自动备份的时间（ISO），仅 APK 有效 */
@@ -126,10 +130,36 @@ const formatSize = (bytes: number) => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** 热更新区块（仅 APK）：当前网页层版本 + 检查 / 安装。 */
+/** 上下文窗口的展示格式：128000 → 128K，1048576 → 1M，1600000 → 1.6M */
+const formatContextWindow = (tokens: number): string => {
+  if (tokens >= 950000) {
+    const millions = tokens / 1000000
+    const rounded = Math.round(millions * 10) / 10
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)}M`
+  }
+  if (tokens >= 1000) {
+    return `${Math.round(tokens / 1000)}K`
+  }
+  return String(tokens)
+}
+
+/** 模型能力的小字标注：能看图 / 上下文长度；都没有就不标 */
+const modelHint = (model: ModelInfo): string => {
+  const parts: string[] = []
+  if (model.vision) {
+    parts.push('能看图')
+  }
+  if (model.contextWindow !== null) {
+    parts.push(`上下文 ${formatContextWindow(model.contextWindow)}`)
+  }
+  return parts.join(' · ')
+}
+
+/** 热更新区块（仅 APK）：当前网页层版本 + 检查 / 安装 + 下载镜像设置。 */
 const WebUpdate = () => {
   const state = useSyncExternalStore(subscribeUpdate, updateState)
   const webVersion = nativeWebVersion()
+  const [mirrorDraft, setMirrorDraft] = useState(() => nativeUpdateMirror())
 
   const runCheck = () => {
     setUpdateState({ state: 'checking' })
@@ -169,7 +199,7 @@ const WebUpdate = () => {
       <div className={styles.backupInfo}>
         <span className={styles.label}>网页层版本</span>
         <span className={styles.count}>
-          {webVersion ?? nativeVersion() ?? '0.3.5'}
+          {webVersion ?? nativeVersion() ?? '0.3.6'}
           {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
         </span>
       </div>
@@ -202,6 +232,23 @@ const WebUpdate = () => {
       {state.state === 'uptodate' && state.message ? (
         <p className={styles.hint}>{state.message}</p>
       ) : null}
+      <label className={styles.label} htmlFor="update-mirror">
+        下载镜像（可选）
+      </label>
+      <input
+        id="update-mirror"
+        className={styles.input}
+        value={mirrorDraft}
+        placeholder="https://ghproxy.net/"
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(event) => setMirrorDraft(event.target.value)}
+        onBlur={() => setNativeUpdateMirror(mirrorDraft)}
+      />
+      <p className={styles.hint}>
+        GitHub 的下载在国内经常拉不动：填一个加速前缀（比如 `https://ghproxy.net/`），更新包会先走它；
+        留空就直连，镜像失败也会自动改回直连重试一次。
+      </p>
     </div>
   )
 }
@@ -214,6 +261,7 @@ export const SettingsSheet = ({
   modelsError,
   onReloadModels,
   onExportProject,
+  onExportAll,
   onImportFile,
   onClearAll,
   lastBackupAt,
@@ -246,12 +294,21 @@ export const SettingsSheet = ({
     }
   }, [open, provider, providersReady])
 
-  const version = nativeVersion() ?? '0.3.5'
+  const version = nativeVersion() ?? '0.3.6'
 
-  // 模型列表还没回来时，也把当前模型显示出来
-  const options = models.some((item) => item.id === settings.model)
-    ? models.map((item) => item.id)
-    : [settings.model, ...models.map((item) => item.id)]
+  // 模型列表还没回来时，也把当前模型显示出来；hint 标注能力（能看图 / 上下文）
+  const options: ModelInfo[] = models.some((item) => item.id === settings.model)
+    ? models
+    : [
+        { id: settings.model, ownedBy: null, vision: false, contextWindow: null },
+        ...models,
+      ]
+
+  const optionEntries = options.map((item) => ({
+    value: item.id,
+    label: item.id,
+    hint: modelHint(item) || undefined,
+  }))
 
   const saveKeyForProvider = (value: string): boolean =>
     providersReady ? saveNativeProviderKey(provider, value) : saveNativeKey(value)
@@ -365,7 +422,7 @@ export const SettingsSheet = ({
           <Select
             className={styles.modelSelect}
             value={settings.model}
-            options={options.map((id) => ({ value: id, label: id }))}
+            options={optionEntries}
             onChange={setModel}
             ariaLabel="当前模型"
           />
@@ -526,6 +583,10 @@ export const SettingsSheet = ({
           <button type="button" className={styles.actionButton} onClick={onExportProject}>
             <IconDownloadOutline16 />
             导出当前项目
+          </button>
+          <button type="button" className={styles.actionButton} onClick={onExportAll}>
+            <IconDownloadOutline16 />
+            导出全部项目
           </button>
           <button type="button" className={styles.actionButton} onClick={() => fileRef.current?.click()}>
             <IconUploadOutline14 />

@@ -9,6 +9,7 @@ import { Button } from '../base/Button.js'
 import {
   IconChevronDownOutline14,
   IconCopyOutline16,
+  IconDownloadOutline16,
   IconEditOutline16,
   IconLinkOutline14,
   IconPaperclipOutline16,
@@ -196,6 +197,10 @@ export type CardViewProps = {
   onDelete: () => void
   /** 只改问题 / 回答的文字，不重新调用模型 */
   onEdit: () => void
+  /** 只改某条追问的问题 / 回答文字，不重新调用模型 */
+  onEditFollowUp: (followUpId: string) => void
+  /** 把这张卡片（问题 + 回答 + 来源）生成长图分享 */
+  onShare: () => void
   /** 从中断处接着生成（仅 partial 卡片） */
   onContinue: () => void
   onOpenRef: (cardId: string) => void
@@ -214,6 +219,8 @@ export const CardView = ({
   onRetry,
   onDelete,
   onEdit,
+  onEditFollowUp,
+  onShare,
   onContinue,
   onOpenRef,
   onRemoveRef,
@@ -241,6 +248,7 @@ export const CardView = ({
   const actions: ActionItem[] = [
     { label: '重答', icon: <IconRefreshOutline16 />, onClick: onBranch, disabled: running },
     { label: '编辑', icon: <IconEditOutline16 />, onClick: onEdit, disabled: running },
+    { label: '分享', icon: <IconDownloadOutline16 />, onClick: onShare, disabled: !answer },
     { label: '引用', icon: <IconLinkOutline14 />, onClick: onAddRef, disabled: running },
     {
       label: '复制',
@@ -395,6 +403,17 @@ export const CardView = ({
                     <p className={styles.errorText}>{followUp.error}</p>
                   ) : null}
                   <SourceList search={followUp.search} />
+                  <div className={styles.followUpFoot}>
+                    <button
+                      type="button"
+                      className={styles.followUpEdit}
+                      onClick={() => onEditFollowUp(followUp.id)}
+                      disabled={Boolean(followLive)}
+                    >
+                      <IconEditOutline16 />
+                      编辑
+                    </button>
+                  </div>
                 </div>
               )
             })}

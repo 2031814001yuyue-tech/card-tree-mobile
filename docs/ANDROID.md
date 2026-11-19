@@ -1,4 +1,4 @@
-# Android APK 说明（card-tree-mobile 0.3.5）
+# Android APK 说明（card-tree-mobile 0.3.6）
 
 这份文档说明 `android/` 壳子是怎么工作的、怎么构建、以及验证到了哪一步。
 产品层面的安装步骤看 [`../README.md`](../README.md) 的「Android APK」一节。
@@ -20,7 +20,7 @@ MainActivity.onCreate()
   ├─ KeyVault(this, "zai_api_key", "card_tree_zai_key_v1")              智谱 Coding Key
   ├─ KeyVault(this, "kimi_api_key", "card_tree_kimi_key_v1")            Kimi Coding Key
   ├─ WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION)              热更新器（见下节）
-  ├─ LocalServer(assets, chatKeys, searchVault::get, sessionId, "0.3.5", preferredPort)
+  ├─ LocalServer(assets, chatKeys, searchVault::get, sessionId, "0.3.6", preferredPort)
   │    ├─ ServerSocket(固定端口, 50, 127.0.0.1)   只监听本机回环；端口固定后复用
   │    └─ 后台线程 acceptLoop()             每连接一个线程（daemon 线程池）
   └─ WebView.loadUrl("http://127.0.0.1:<port>/")
@@ -102,6 +102,8 @@ WebUpdater.check()
 
 WebUpdater.install(info, progress)
   ├─ 下载 web.zip（≤64MB）→ 按资产里的 sha256 校验，不一致直接取消
+  │   （0.3.6 起优先走「下载镜像」前缀；镜像失败自动回直连重试一次，progress 会报
+  │    「镜像下载失败，改用直连」；镜像存 SharedPreferences，网页侧可改）
   ├─ 解压到 files/web-staging/（canonical path 防 zip-slip，单文件 32MB / 总量 96MB 上限，
   │   必须能找到 index.html，否则整个取消）
   ├─ deleteRecursive(files/web/) → staging.renameTo(files/web)   ← 原子切换
@@ -127,14 +129,15 @@ MainActivity 的 AssetSource：
 | `MainActivity.java` | 唯一 Activity：起服务、配 WebView、处理返回键 / 文件选择 / 状态栏配色 / 导出备份、挂 WebUpdater、启动静默检查 |
 | `LocalServer.java` | 本地 HTTP/1.1 服务（纯 JDK，不依赖 Android）：静态资源 + `/api/models` `/api/chat/completions`（SSE 逐块透传）+ `/api/deepseek/search`（搜索转发） |
 | `KeyVault.java` | API Key 的加解密：Android Keystore 里生成不可导出的 AES-256-GCM 密钥，密文（iv + ciphertext）Base64 存 SharedPreferences；构造器带 `field` / `alias`，对话 Key 与搜索 Key 各存一把 |
-| `WebUpdater.java` | 热更新器（纯 JDK）：查 GitHub Releases → 下载 → sha256 校验 → 解压 staging → 原子切换 `files/web` → 写版本号；内嵌一个小型 JSON 解析器只读 Releases 响应 |
-| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / hasProviderKey / saveProviderKey / clearProviderKey / version / setChrome / saveBackup / saveAutoBackup / toast / getWebVersion / checkWebUpdate / installWebUpdate` |
+| `WebUpdater.java` | 热更新器（纯 JDK）：查 GitHub Releases → 下载（可走镜像前缀，失败回直连）→ sha256 校验 → 解压 staging → 原子切换 `files/web` → 写版本号；内嵌一个小型 JSON 解析器只读 Releases 响应 |
+| `NativeBridge.java` | `@JavascriptInterface`，注入 `window.CardTreeNative`：`hasKey / saveKey / clearKey / hasSearchKey / saveSearchKey / clearSearchKey / hasProviderKey / saveProviderKey / clearProviderKey / version / setChrome / saveBackup / saveAutoBackup / saveImage / toast / getWebVersion / checkWebUpdate / installWebUpdate / setUpdateMirror / getUpdateMirror` |
 | `AssetSource.java` | 一行接口，把 `assets/www/<path>` 抽象成 `InputStream`（方便在桌面 JVM 上测 `LocalServer`） |
 | `Mime.java` | 扩展名 → Content-Type |
 
 网页侧对应新增 `app/src/services/native.ts`：
 
-- `isNativeApp()` / `nativeBridge()` / `nativeHasKey()` / `saveNativeKey()` / `clearNativeKey()` / `nativeHasSearchKey()` / `saveNativeSearchKey()` / `clearNativeSearchKey()` / `nativeHasProviderKey()` / `saveNativeProviderKey()` / `clearNativeProviderKey()` / `nativeSupportsProviders()` / `nativeVersion()` / `saveNativeBackup()` / `saveNativeAutoBackup()`
+- `isNativeApp()` / `nativeBridge()` / `nativeHasKey()` / `saveNativeKey()` / `clearNativeKey()` / `nativeHasSearchKey()` / `saveNativeSearchKey()` / `clearNativeSearchKey()` / `nativeHasProviderKey()` / `saveNativeProviderKey()` / `clearNativeProviderKey()` / `nativeSupportsProviders()` / `nativeVersion()` / `saveNativeBackup()` / `saveNativeAutoBackup()` / `saveNativeImage()` / `nativeUpdateMirror()` / `setNativeUpdateMirror()`（后三个是可选桥方法，旧壳 0.3.4 没有会安全降级）
+- 0.3.6 网页侧新增：`services/share.ts` 纯 canvas 把单卡渲染成 720px 长图（`renderCardImage`，跟随深浅色），APK 里经 `saveImage` 存「下载/CardTree」，网页版直接触发下载；「导出全部项目」走 `io.ts` 的 `exportAllProjectsJson`（与桌面版 `state.json` 同构）
 - `App.tsx` 在 `window.__cardTreeBack` 上挂返回键处理（先关浮层 → 再回树 → 都没有才退出），在 `window.__cardTreeKeyChanged` 上挂模型重拉
 - 没有 Key 时弹一次「先连上 <当前订阅>」的 Sheet；「设置 → 连接」跟随当前订阅显示 / 替换 / 清除那家的 Key
 - `theme.ts` 把纸面背景色同步给原生状态栏 / 导航栏（四种界面风格切换时也会跟着换）
@@ -163,13 +166,13 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 ### 版本号
 
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
-`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.5'` 的兜底值、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
+`android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.6'` 的兜底值（有两处，含 WebUpdate 组件里那处）、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
 ## 已做的验证
 
 | 项目 | 结果 |
 | --- | --- |
-| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='8' versionName='0.3.5'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
+| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='9' versionName='0.3.6'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
 | `apksigner verify` | release APK 由 `android/app/card-tree-release.jks` 签名（v2 方案），证书 DN `CN=CardTree Mobile` —— 不是 debug 证书 |
 | APK 内容 | 167 个条目，其中 156 个是 `assets/www/**`：`index.html`、`manifest.webmanifest`、`icon-180/192/512.png`、单个 hash 化的 `static/js/main.*.js` + `static/css/main.*.css` + KaTeX 字体 |
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
@@ -179,6 +182,8 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | **WebUpdater 全链路** | **真实 GitHub API**：同版本（0.3.4）check → `null`（无更新）；低版本（0.0.1）check → 正确拿到 `web-v0.3.4`（tag/size/notes 齐全）。**本地服务器扮演 GitHub 完整安装**：check → 下载 → sha256 校验 → 解压 156 个文件（`index.html` 1450 B、`static/css/main.*.css` 73530 B 都能从 `files/web/` 读出）→ 原子切换 → `currentWebVersion()` 读回 `9.9.9`；`../` 目录穿越被拒绝；**sha256 不一致**时抛「更新包校验失败（sha256 不一致），已取消」且 `files/web` 不被创建、版本仍是壳版本 |
 | 发布脚本 | `node scripts/publish-web.mjs` 发布 `web-v0.3.5`（web.zip 1.78 MB、156 个条目、正斜杠路径），`jar tf` 验证 zip 结构正确；gh 前置检查（auth / tag 不存在）都过 |
 | 四家订阅路由 | `GET /api/models` 带 `x-card-tree-provider` 四家全 200；kimi / deepseek / opencode 流式对话真跑通（31 / 17 / 8 chunks）；智谱返回 429「套餐已到期」原样透传；未知头 400 `provider_unknown`；「设置 → 连接」随当前订阅显示（CDP 假桥注入验证，见 `docs/preview/29-providers.png`） |
+| **镜像回退（0.3.6）** | 本地双 HttpServer 扮演直连源与镜像源：配好镜像时 `install` 全程走镜像装包成功（LOG 无回退）；镜像指向无人监听端口时自动报「镜像下载失败，改用直连」并回退直连成功；空镜像直连回归正常。手写 STORED zip 验证了解压路径（教训：单文件 zip 的 CRC 必须真算） |
+| 0.3.6 新交互 | CDP 文本 dump 验证：卡片操作行六 chip（含「分享」）、追问右下「编辑」、分享 toast、模型菜单「能看图 · 上下文 1M」（读自真实 `/models` 的 `limit.context` 字段——注意不是 `context_window`）、「导出全部项目」按钮、「下载镜像」输入框（见 `docs/preview/34–37`） |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 
@@ -199,4 +204,5 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 - **联网搜索点了没反应 / 显示「联网（未开通）」**：说明还没配第二把 Key。到「设置 → 联网搜索」粘贴一把 DeepSeek API Key（可以在 `platform.deepseek.com` 创建），保存后按钮就可以点亮了；搜索接口返回 409 也是同一个原因。
 - **联网搜索报错**：卡片上不会显示搜索错误（不阻塞回答），只会 toast 一句「联网搜索失败，这次先按不联网回答」；`/api/deepseek/search` 返回 502 多半是 Key 没有 Search API 权限或网络不通。
 - **升级后界面没变**：`gradle assembleDebug` 会重新复制 `app/dist` 并清空旧资源；确认先跑了 `pnpm build`。
-- **「检查更新」一直失败 / 下载不动**：检查更新走 `api.github.com`（匿名限流 60 次/小时/IP，一般够用，被限流会提示「访问太频繁」）；下载走 GitHub 的文件 CDN（`objects.githubusercontent.com`），国内网络偶尔拉不动——拉不动就留在当前版本下次再试，不影响使用。仓库必须是 public，private 会让检查一直 404。
+- **「检查更新」一直失败 / 下载不动**：检查更新走 `api.github.com`（匿名限流 60 次/小时/IP，一般够用，被限流会提示「访问太频繁」）；下载走 GitHub 的文件 CDN（`objects.githubusercontent.com`），国内网络偶尔拉不动——0.3.6 起可以在「设置 → 关于 → 下载镜像」填一个加速前缀（如 `https://ghproxy.net/`），镜像失败会自动改回直连重试一次；拉不动就留在当前版本下次再试，不影响使用。仓库必须是 public，private 会让检查一直 404。
+- **分享长图找不到**：和导出备份同目录——Android 10+ 在「下载/CardTree」，更老系统在应用外部 Documents 目录；文件名 `card-<时间>-<标题>.png`。网页版点「分享」是直接触发浏览器下载。

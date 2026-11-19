@@ -413,6 +413,40 @@
   background: var(--ct-paper);
 }
 
+.followUpFoot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.followUpEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ct-ink-faint);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+
+  svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--ct-surface-sunken);
+    color: var(--ct-ink-soft);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
 .followQuestion {
   margin: 0;
   color: var(--ct-ink);

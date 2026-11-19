@@ -371,6 +371,27 @@ const parseJson = (text: string): unknown => {
 export const exportProjectJson = (project: Project): string => JSON.stringify(project, null, 2)
 
 /**
+ * 把全部项目导出成桌面插件 state.json 同构的格式：
+ * `{ version, revision, savedAt, activeProjectId, sessions, model, projects }`。
+ * 手机的「导入备份」按 projects 数组读回；桌面版理论上可以拿它整体替换
+ * state.json（字段命名一致，但没在桌面端实测过，见 README 的说明）。
+ */
+export const exportAllProjectsJson = (projects: Project[], activeProjectId: string | null): string =>
+  JSON.stringify(
+    {
+      version: 1,
+      revision: 0,
+      savedAt: new Date().toISOString(),
+      activeProjectId,
+      sessions: {},
+      model: {},
+      projects,
+    },
+    null,
+    2,
+  )
+
+/**
  * 解析手机版备份。接受 Project 本身，也接受 `{ project: Project }` 这种包装。
  * 不是合法备份时抛 `Error('不是有效的卡片树备份')`。
  */

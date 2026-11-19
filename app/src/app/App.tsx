@@ -23,9 +23,11 @@ import {
   nativeHasKey,
   nativeHasProviderKey,
   nativeSupportsProviders,
+  saveNativeImage,
   saveNativeKey,
   saveNativeProviderKey,
 } from '../services/native.js'
+import { downloadCardImage, renderCardImage } from '../services/share.js'
 import { setUpdateState } from '../services/update.js'
 import { useSettings } from '../services/settings.js'
 import type { Attachment } from '../services/tree/types.js'
@@ -79,11 +81,13 @@ export const App = () => {
   const reparent = useStore((state) => state.reparent)
   const refLink = useStore((state) => state.refLink)
   const exportActive = useStore((state) => state.exportActive)
+  const exportAll = useStore((state) => state.exportAll)
   const importFile = useStore((state) => state.importFile)
   const clearAll = useStore((state) => state.clearAll)
   const setProjectSystem = useStore((state) => state.setProjectSystem)
   const continueCard = useStore((state) => state.continueCard)
   const editCard = useStore((state) => state.editCard)
+  const editFollowUp = useStore((state) => state.editFollowUp)
   const backupNow = useStore((state) => state.backupNow)
   const clearAuthRequired = useStore((state) => state.clearAuthRequired)
 
@@ -98,8 +102,10 @@ export const App = () => {
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [systemValue, setSystemValue] = useState('')
-  /** 正在编辑文字的卡片（null = 没打开编辑面板） */
-  const [editCardId, setEditCardId] = useState<string | null>(null)
+  /** 正在编辑文字的目标（卡片本身，或卡片里的某条追问；null = 没打开编辑面板） */
+  const [editTarget, setEditTarget] = useState<{ cardId: string; followUpId: string | null } | null>(
+    null,
+  )
   const [editPrompt, setEditPrompt] = useState('')
   const [editAnswer, setEditAnswer] = useState('')
   /** 长按某张卡片弹出的快捷菜单 */
@@ -221,8 +227,8 @@ export const App = () => {
         setQuickCardId(null)
         return true
       }
-      if (editCardId) {
-        setEditCardId(null)
+      if (editTarget) {
+        setEditTarget(null)
         return true
       }
       if (refPickerOpen) {
@@ -257,7 +263,7 @@ export const App = () => {
   }, [
     keyNeeded,
     quickCardId,
-    editCardId,
+    editTarget,
     refPickerOpen,
     renameOpen,
     overviewOpen,
@@ -427,14 +433,44 @@ export const App = () => {
     setSearchOn((current) => !current)
   }
 
-  const openEdit = (cardId: string) => {    const target = project?.cards.find((item) => item.id === cardId)
+  const openEdit = (cardId: string, followUpId: string | null = null) => {
+    const target = project?.cards.find((item) => item.id === cardId)
     if (!target) {
       return
     }
+    const source =
+      followUpId === null
+        ? { prompt: target.prompt, answer: target.answer }
+        : target.followUps.find((item) => item.id === followUpId)
+    if (!source) {
+      return
+    }
     setQuickCardId(null)
-    setEditCardId(cardId)
-    setEditPrompt(target.prompt)
-    setEditAnswer(target.answer)
+    setEditTarget({ cardId, followUpId })
+    setEditPrompt(source.prompt)
+    setEditAnswer(source.answer)
+  }
+
+  /** 把一张卡片（问题 + 回答 + 来源）生成长图：APK 里存进「下载/CardTree」，网页里直接下载 */
+  const handleShareCard = (cardId: string) => {
+    if (!project) {
+      return
+    }
+    const target = project.cards.find((item) => item.id === cardId)
+    if (!target) {
+      return
+    }
+    const dataUrl = renderCardImage(project, target)
+    if (!dataUrl) {
+      showToast('生成长图失败')
+      return
+    }
+    const saved = saveNativeImage(dataUrl, 'card.png')
+    if (saved) {
+      showToast(`长图已保存到 ${saved}`)
+      return
+    }
+    downloadCardImage(dataUrl, target.prompt)
   }
 
   const confirmAction = (message: string, action: () => void) => {
@@ -526,6 +562,8 @@ export const App = () => {
               confirmAction('删除这张卡片？它下面的卡片会一起被删掉。', () => deleteCard(card.id))
             }
             onEdit={() => openEdit(card.id)}
+            onEditFollowUp={(followUpId) => openEdit(card.id, followUpId)}
+            onShare={() => handleShareCard(card.id)}
             onContinue={() => continueCard(card.id)}
             onOpenRef={(refId) => openCard(refId)}
             onRemoveRef={(refId) => removeRef(card.id, refId)}
@@ -610,6 +648,7 @@ export const App = () => {
         modelsError={modelsError}
         onReloadModels={() => void loadModels()}
         onExportProject={exportActive}
+        onExportAll={exportAll}
         onImportFile={(file) => {
           void file
             .text()
@@ -736,21 +775,29 @@ export const App = () => {
       </Sheet>
 
       <Sheet
-        open={editCardId !== null}
-        title="编辑卡片文字"
-        onClose={() => setEditCardId(null)}
+        open={editTarget !== null}
+        title={editTarget?.followUpId ? '编辑追问文字' : '编辑卡片文字'}
+        onClose={() => setEditTarget(null)}
       >
         <form
           className={styles.editForm}
           onSubmit={(event) => {
             event.preventDefault()
-            if (!editCardId) {
+            const target = editTarget
+            if (!target) {
               return
             }
             try {
-              editCard(editCardId, { prompt: editPrompt, answer: editAnswer })
-              setEditCardId(null)
-              showToast('卡片已更新')
+              if (target.followUpId === null) {
+                editCard(target.cardId, { prompt: editPrompt, answer: editAnswer })
+              } else {
+                editFollowUp(target.cardId, target.followUpId, {
+                  prompt: editPrompt,
+                  answer: editAnswer,
+                })
+              }
+              setEditTarget(null)
+              showToast('已更新')
             } catch (error) {
               showToast(error instanceof Error ? error.message : '保存失败')
             }
@@ -777,7 +824,7 @@ export const App = () => {
             onChange={(event) => setEditAnswer(event.target.value)}
           />
           <div className={styles.editActions}>
-            <button type="button" className={styles.quickItem} onClick={() => setEditCardId(null)}>
+            <button type="button" className={styles.quickItem} onClick={() => setEditTarget(null)}>
               取消
             </button>
             <button type="submit" className={styles.keyButton}>
@@ -816,6 +863,20 @@ export const App = () => {
           >
             编辑文字
           </button>
+          {quickCard?.answer ? (
+            <button
+              type="button"
+              className={styles.quickItem}
+              onClick={() => {
+                if (quickCard) {
+                  handleShareCard(quickCard.id)
+                }
+                setQuickCardId(null)
+              }}
+            >
+              分享成长图
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.quickItem}

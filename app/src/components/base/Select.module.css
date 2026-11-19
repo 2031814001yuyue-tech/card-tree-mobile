@@ -122,3 +122,21 @@
     color: var(--ct-blue);
   }
 }
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.optionHint {
+  font-size: 10.5px;
+  color: var(--ct-ink-faint);
+
+  [aria-selected='true'] & {
+    color: var(--ct-blue);
+    opacity: 0.72;
+  }
+}

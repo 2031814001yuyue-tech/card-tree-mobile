@@ -75,6 +75,8 @@ public final class WebUpdater {
     private final String shellVersion;
     private final File webDir;
     private final String apiBase;
+    /** 下载镜像前缀（空 = 直连 GitHub），由壳从设置里注入。 */
+    private volatile String mirror = "";
 
     /**
      * @param baseDir App 的 files 目录（更新解压到这里）
@@ -108,6 +110,23 @@ public final class WebUpdater {
     /** 网页层根目录（可能不存在 = 从没热更新过）。 */
     public File webDir() {
         return webDir;
+    }
+
+    /**
+     * 设置下载镜像前缀（形如 {@code https://ghproxy.net/}），空串表示直连。
+     * 只影响资产下载（zip / sha256），检查更新仍走 GitHub API。
+     */
+    public void setMirror(String prefix) {
+        String value = prefix == null ? "" : prefix.trim();
+        if (!value.isEmpty() && !value.endsWith("/")) {
+            value = value + "/";
+        }
+        this.mirror = value;
+    }
+
+    /** 当前镜像前缀（没配置时是空串）。 */
+    public String mirror() {
+        return mirror;
     }
 
     /**
@@ -221,10 +240,10 @@ public final class WebUpdater {
         }
         try {
             report.report("正在下载更新包…");
-            downloadTo(info.zipUrl, zipFile);
+            downloadTo(info.zipUrl, zipFile, report);
 
             report.report("正在校验更新包…");
-            String expected = fetchText(info.sha256Url, 512).trim().split("\\s+")[0];
+            String expected = fetchText(info.sha256Url, 512, report).trim().split("\\s+")[0];
             String actual = sha256Hex(zipFile);
             if (!expected.equalsIgnoreCase(actual)) {
                 throw new IOException("更新包校验失败（sha256 不一致），已取消");
@@ -349,13 +368,46 @@ public final class WebUpdater {
         return connection;
     }
 
-    private void downloadTo(String url, File target) throws IOException {
-        HttpURLConnection connection = open(url, "application/octet-stream");
+    /** 镜像 URL：镜像没配置或目标不是 http(s) 时原样返回。 */
+    private String mirrorUrl(String url) {
+        if (mirror.isEmpty() || !url.startsWith("http")) {
+            return url;
+        }
+        return mirror + url;
+    }
+
+    /**
+     * 打开下载连接：配了镜像先走镜像，连不上或状态不对时自动回退直连再试一次。
+     * 返回的连接状态一定是 200（两种途径都失败才抛 IOException，消息面向用户）。
+     */
+    private HttpURLConnection openDownload(String url, String accept, Progress report, String doing)
+            throws IOException {
+        if (mirror.isEmpty()) {
+            return openChecked(url, accept, doing);
+        }
         try {
-            int status = connection.getResponseCode();
-            if (status != 200) {
-                throw new IOException("下载更新包失败（HTTP " + status + "）");
+            return openChecked(mirrorUrl(url), accept, doing);
+        } catch (IOException error) {
+            if (report != null) {
+                report.report("镜像下载失败，改用直连…");
             }
+            return openChecked(url, accept, doing);
+        }
+    }
+
+    private HttpURLConnection openChecked(String url, String accept, String doing) throws IOException {
+        HttpURLConnection connection = open(url, accept);
+        int status = connection.getResponseCode();
+        if (status != 200) {
+            connection.disconnect();
+            throw new IOException(doing + "失败（HTTP " + status + "）");
+        }
+        return connection;
+    }
+
+    private void downloadTo(String url, File target, Progress report) throws IOException {
+        HttpURLConnection connection = openDownload(url, "application/octet-stream", report, "下载更新包");
+        try {
             try (InputStream in = connection.getInputStream();
                     OutputStream out = new FileOutputStream(target)) {
                 byte[] buffer = new byte[16 * 1024];
@@ -374,13 +426,9 @@ public final class WebUpdater {
         }
     }
 
-    private String fetchText(String url, long cap) throws IOException {
-        HttpURLConnection connection = open(url, "text/plain");
+    private String fetchText(String url, long cap, Progress report) throws IOException {
+        HttpURLConnection connection = openDownload(url, "text/plain", report, "下载校验文件");
         try {
-            int status = connection.getResponseCode();
-            if (status != 200) {
-                throw new IOException("下载校验文件失败（HTTP " + status + "）");
-            }
             return new String(readCapped(connection.getInputStream(), cap), StandardCharsets.UTF_8);
         } finally {
             connection.disconnect();

@@ -180,9 +180,33 @@ export const fetchModels = async (
     models.push({
       id: item.id,
       ownedBy: typeof item.owned_by === 'string' ? item.owned_by : null,
+      vision: modelSupportsVision(item),
+      contextWindow: modelContextWindow(item),
     })
   }
   return models
+}
+
+/** 各家对「图片输入」的字段名不完全一致，但都长成 modalities.input: string[] */
+const modelSupportsVision = (item: Record<string, unknown>): boolean => {
+  const modalities = isRecord(item.modalities) ? item.modalities : null
+  const input = modalities && Array.isArray(modalities.input) ? modalities.input : null
+  if (!input) {
+    return false
+  }
+  return input.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('image'))
+}
+
+/** 上下文窗口：opencode 的 limit.context，兼容 context_window / max_context_length */
+const modelContextWindow = (item: Record<string, unknown>): number | null => {
+  const limit = isRecord(item.limit) ? item.limit : item
+  for (const key of ['context', 'context_window', 'max_context_length', 'contextWindow']) {
+    const value = toFiniteNumber(limit[key])
+    if (value !== null && value > 0) {
+      return value
+    }
+  }
+  return null
 }
 
 /**

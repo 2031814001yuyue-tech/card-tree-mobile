@@ -26,7 +26,7 @@ import {
   searchBlock,
 } from './context.js'
 import * as db from './db.js'
-import { downloadJson, exportProjectJson, importDesktopState, importProjectJson } from './io.js'
+import { downloadJson, exportAllProjectsJson, exportProjectJson, importDesktopState, importProjectJson } from './io.js'
 import * as model from './model.js'
 import type { LiveText } from './live.js'
 import type { Attachment, CardSearch, CardStats, Project } from './types.js'
@@ -81,6 +81,12 @@ export type Store = {
   deleteCard: (cardId: string) => void
   /** 手动改卡片的问题 / 回答文字，不重新生成 */
   editCard: (cardId: string, patch: { prompt?: string; answer?: string }) => void
+  /** 手动改追问的问题 / 回答文字，不重新生成 */
+  editFollowUp: (
+    cardId: string,
+    followUpId: string,
+    patch: { prompt?: string; answer?: string },
+  ) => void
   addRef: (cardId: string, refId: string) => void
   removeRef: (cardId: string, refId: string) => void
   /** 全览图拖动：改父级（parentId=null 表示摘成根卡片），返回是否真的改了 */
@@ -90,6 +96,8 @@ export type Store = {
   layout: () => void
 
   exportActive: () => void
+  /** 导出全部项目：桌面 state.json 同构格式（手机「导入备份」能读回） */
+  exportAll: () => void
   importFile: (text: string) => number
   clearAll: () => Promise<void>
   /** 把全部项目写一份滚动备份（仅 APK；返回落点描述，网页版返回 null） */
@@ -595,6 +603,10 @@ export const useStore = create<Store>((set, get) => {
       commit((project) => model.updateCard(project, cardId, patch))
     },
 
+    editFollowUp: (cardId, followUpId, patch) => {
+      commit((project) => model.updateFollowUp(project, cardId, followUpId, patch))
+    },
+
     addRef: (cardId, refId) => {
       commit((project) => model.addRef(project, cardId, refId))
     },
@@ -647,6 +659,21 @@ export const useStore = create<Store>((set, get) => {
         return
       }
       downloadJson(`${safe}.json`, json)
+    },
+
+    exportAll: () => {
+      const state = get()
+      if (!state.projects.length) {
+        showToast('还没有项目可以导出')
+        return
+      }
+      const json = exportAllProjectsJson(state.projects, state.activeProjectId)
+      const saved = saveNativeBackup(json, 'card-tree-all.json')
+      if (saved) {
+        showToast(`已导出到 ${saved}`)
+        return
+      }
+      downloadJson('card-tree-all.json', json)
     },
 
     importFile: (text) => {

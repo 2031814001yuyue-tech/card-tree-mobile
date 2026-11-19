@@ -24,6 +24,10 @@ export class ApiError extends Error {
 export type ModelInfo = {
   id: string
   ownedBy: string | null
+  /** 上游声明支持图片输入（modalities.input 含 image/*）时为 true；没声明就是 false */
+  vision: boolean
+  /** 上游声明的上下文窗口（token 数）；各家字段名不一，取不到为 null */
+  contextWindow: number | null
 }
 
 export type ChatRole = 'system' | 'user' | 'assistant'

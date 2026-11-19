@@ -1,6 +1,6 @@
 {
   "name": "card-tree-mobile",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "卡片树手机版：把对话拆成一张张卡片，长成一棵可以回看的树。",
   "license": "MIT",
