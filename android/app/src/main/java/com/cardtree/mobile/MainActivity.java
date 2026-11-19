@@ -38,7 +38,7 @@ import java.util.UUID;
  */
 public final class MainActivity extends Activity {
 
-    public static final String APP_VERSION = "0.3.9";
+    public static final String APP_VERSION = "0.3.12";
 
     /** 网页层热更新从这个仓库的 GitHub Releases 拿（tag 形如 web-v0.3.5，附带 web.zip + 哈希）。 */
     private static final String UPDATE_REPO = "2031814001yuyue-tech/card-tree-mobile";
@@ -103,6 +103,8 @@ public final class MainActivity extends Activity {
                     sessionId(), APP_VERSION, preferredPort);
             // 启动成功后把实际端口写回：首次随机，之后固定，WebView 的源不会变
             prefs.edit().putInt(PORT_FIELD, server.port()).apply();
+            // 回答完成通知：SSE 自然读尽时本地服务回调；只有 App 在后台才发（前台用户看得见，别打扰）
+            server.setChatDoneListener(this::notifyAnswerDone);
             web.loadUrl("http://127.0.0.1:" + server.port() + "/");
             // 稳定起来之后静默查一次网页层更新（失败不打扰用户）
             web.postDelayed(this::checkWebUpdateSilently, 4000);
@@ -110,6 +112,63 @@ public final class MainActivity extends Activity {
             showToast("本地服务启动失败：" + error.getMessage());
             finish();
         }
+        requestNotificationPermissionIfNeeded();
+    }
+
+    /** App 在前台时用户本来就看得见，不打扰；退到后台才需要通知。 */
+    private volatile boolean resumed = true;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumed = true;
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        resumed = false;
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        // Android 13+ 发通知要运行时授权；拒绝过就静默不发，不影响其它功能
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1002);
+        }
+    }
+
+    /** 本地服务回调：一条对话（或原生搜索）正常生成完了。providerId 备用（标题里可以区分订阅）。 */
+    private void notifyAnswerDone(String providerId) {
+        if (resumed) {
+            return;
+        }
+        runOnUiThread(() -> {
+            try {
+                android.app.NotificationManager manager =
+                        (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                android.app.NotificationChannel channel = new android.app.NotificationChannel(
+                        "answers", "回答完成", android.app.NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setDescription("App 在后台时提醒回答已经生成完");
+                manager.createNotificationChannel(channel);
+                Intent intent = new Intent(this, MainActivity.class);
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                android.app.PendingIntent pending = android.app.PendingIntent.getActivity(
+                        this, 0, intent, android.app.PendingIntent.FLAG_IMMUTABLE);
+                android.app.Notification notification =
+                        new android.app.Notification.Builder(this, "answers")
+                                .setSmallIcon(R.mipmap.ic_launcher)
+                                .setContentTitle("卡片树 · 回答完成")
+                                .setContentText("有一条卡片刚刚回答完，回来看看吧")
+                                .setContentIntent(pending)
+                                .setAutoCancel(true)
+                                .build();
+                manager.notify(1001, notification);
+            } catch (RuntimeException ignored) {
+                // SecurityException 是 RuntimeException 的子类；没授权 / 系统限制：静默跳过，不影响回答本身
+            }
+        });
     }
 
     private void configure(WebView view, Map<String, KeyVault> providerVaults) {

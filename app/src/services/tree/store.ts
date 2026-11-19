@@ -43,6 +43,25 @@ export type View = 'tree' | 'card'
 
 type RunTarget = { cardId: string; followUpId: string | null }
 
+/**
+ * 网页版的完成通知（APK 里不发：Java 本地服务会在后台直接发系统通知，比网页层可靠）。
+ * 只在页面不可见且浏览器通知已授权时发；没授权 / 不支持就静默跳过。
+ */
+const notifyAnswerDone = (question: string) => {
+  if (isNativeApp() || typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+    return
+  }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+    return
+  }
+  try {
+    const brief = question.length > 36 ? `${question.slice(0, 36)}…` : question
+    new Notification('卡片树 · 回答完成', { body: `「${brief}」回答完了，回来看看`, tag: 'card-tree-answer' })
+  } catch {
+    // 个别浏览器构造 Notification 会抛（策略/上下文变化）：忽略
+  }
+}
+
 export type Store = {
   ready: boolean
   projects: Project[]
@@ -384,6 +403,7 @@ export const useStore = create<Store>((set, get) => {
     }
     if (!failure) {
       finish(target, { answer: finalAnswer(), thinking, status: 'done', error: null, stats })
+      notifyAnswerDone(question)
       return
     }
     const aborted = failure instanceof ApiError && failure.kind === 'interrupted'

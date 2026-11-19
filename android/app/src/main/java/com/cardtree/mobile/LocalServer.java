@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>纯 JDK 实现，不依赖 Android 类，便于在桌面 JVM 上单独跑测试。
  */
-public final class LocalServer implements Closeable {
+public class LocalServer implements Closeable {
 
     /** 提供 API Key（手机上是 KeyVault 解密后的值）。 */
     public interface KeyProvider {
@@ -60,7 +60,7 @@ public final class LocalServer implements Closeable {
     };
 
     /** 纯数据：一家订阅上游的描述。 */
-    private static final class Provider {
+    static final class Provider {
         final String id;
         /** 中文显示名，用在「还没配置 Key」的报错里 */
         final String label;
@@ -90,6 +90,35 @@ public final class LocalServer implements Closeable {
     private final String version;
     private final ExecutorService pool;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+
+    /** 回答完成回调：SSE 正常透传到上游 EOF 且中途无异常时触发一次（用户点停止会掐断连接，不会触发）。 */
+    public interface ChatDoneListener {
+        void onChatComplete(String providerId);
+    }
+
+    /** 由 MainActivity 注入，用来在 App 退后台时发系统通知；null 表示不通知。 */
+    private volatile ChatDoneListener chatDone;
+
+    public void setChatDoneListener(ChatDoneListener listener) {
+        chatDone = listener;
+    }
+
+    private void notifyChatDone(String providerId) {
+        ChatDoneListener listener = chatDone;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.onChatComplete(providerId);
+        } catch (RuntimeException ignored) {
+            // 通知失败不影响回答本身
+        }
+    }
+
+    /** 测试缝：默认返回 provider.base；桌面 JVM harness 覆盖它指向本地假上游。 */
+    String providerBase(Provider provider) {
+        return provider.base;
+    }
 
     /** models 缓存按 provider 分开：id → {body, at}，一家一份互不顶掉 */
     private final Map<String, ModelsCache> modelsCache = new ConcurrentHashMap<>();
@@ -398,8 +427,9 @@ public final class LocalServer implements Closeable {
             return;
         }
         byte[] payload = body == null ? new byte[0] : body;
+        // providerBase 是测试缝：生产返回 provider.base，桌面 harness 覆盖它指向本地假上游
         HttpURLConnection connection =
-                (HttpURLConnection) new URL(provider.base + "/chat/completions").openConnection();
+                (HttpURLConnection) new URL(providerBase(provider) + "/chat/completions").openConnection();
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
         connection.setConnectTimeout(20_000);
@@ -432,16 +462,22 @@ public final class LocalServer implements Closeable {
         out.flush();
         InputStream upstream = connection.getInputStream();
         byte[] buffer = new byte[4096];
+        boolean finished = false;
         try {
             int read;
             while (!closed.get() && (read = upstream.read(buffer)) >= 0) {
                 out.write(buffer, 0, read);
                 out.flush();
             }
+            // 只有「上游自然 EOF 且服务没在关闭」才算回答完成；点停止 / 断网走 catch，不通知
+            finished = !closed.get();
         } catch (IOException ignored) {
             // WebView 主动取消（点停止）时会断开连接
         } finally {
             connection.disconnect();
+        }
+        if (finished) {
+            notifyChatDone(provider.id);
         }
     }
 
@@ -497,16 +533,21 @@ public final class LocalServer implements Closeable {
         out.flush();
         InputStream upstream = connection.getInputStream();
         byte[] buffer = new byte[4096];
+        boolean finished = false;
         try {
             int read;
             while (!closed.get() && (read = upstream.read(buffer)) >= 0) {
                 out.write(buffer, 0, read);
                 out.flush();
             }
+            finished = !closed.get();
         } catch (IOException ignored) {
             // WebView 主动取消（点停止）时会断开连接
         } finally {
             connection.disconnect();
+        }
+        if (finished) {
+            notifyChatDone("deepseek");
         }
     }
 

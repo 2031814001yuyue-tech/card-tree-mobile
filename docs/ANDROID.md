@@ -1,4 +1,4 @@
-# Android APK 说明（card-tree-mobile 0.3.9）
+# Android APK 说明（card-tree-mobile 0.3.12）
 
 这份文档说明 `android/` 壳子是怎么工作的、怎么构建、以及验证到了哪一步。
 产品层面的安装步骤看 [`../README.md`](../README.md) 的「Android APK」一节。
@@ -20,9 +20,11 @@ MainActivity.onCreate()
   ├─ KeyVault(this, "zai_api_key", "card_tree_zai_key_v1")              智谱 Coding Key
   ├─ KeyVault(this, "kimi_api_key", "card_tree_kimi_key_v1")            Kimi Coding Key
   ├─ WebUpdater(getFilesDir(), UPDATE_REPO, APP_VERSION)              热更新器（见下节）
-  ├─ LocalServer(assets, chatKeys, searchVault::get, sessionId, "0.3.6", preferredPort)
+  ├─ LocalServer(assets, chatKeys, searchVault::get, sessionId, "0.3.12", preferredPort)
   │    ├─ ServerSocket(固定端口, 50, 127.0.0.1)   只监听本机回环；端口固定后复用
-  │    └─ 后台线程 acceptLoop()             每连接一个线程（daemon 线程池）
+  │    ├─ 后台线程 acceptLoop()             每连接一个线程（daemon 线程池）
+  │    └─ setChatDoneListener(this::notifyAnswerDone)   流式自然读完 → 后台时发系统通知
+  │                                             （0.3.12：客户端中途断开 = 点停止，不触发）
   └─ WebView.loadUrl("http://127.0.0.1:<port>/")
         │
         ├─ GET /                     → files/web/index.html（热更新版）→ 没有再回 assets/www
@@ -41,6 +43,7 @@ MainActivity.onCreate()
 
 要点：
 
+- **回答完成通知（0.3.12）**：`LocalServer` 在透传循环里区分「上游自然读完」（`finished`）与「客户端断开」（点停止），只有前者调 `notifyChatDone(provider)` → `MainActivity.notifyAnswerDone`（`resumed` 时直接返回，即前台用 App 不打扰；后台时走通知 channel "answers"、点通知回 App）。`handleAnthropic`（原生联网搜索）同样接了。Android 13+ 首次启动 `requestNotificationPermissionIfNeeded()` 请求 `POST_NOTIFICATIONS`。网页版的对应逻辑在 `store.ts` 的 `notifyAnswerDone`（`visibilityState==='hidden'` 且已授权才发浏览器通知，授权入口在「设置 → 关于」）。
 - `127.0.0.1` 是安全上下文，`navigator.serviceWorker` / `localStorage` / `IndexedDB` 都能用；不过 **Service Worker 在 APK 里不注册**（`registerServiceWorker()` 检测到 `window.CardTreeNative` 就直接返回），因为资源本来就在本地，注册反而会在升级后读到旧缓存。
 - **端口固定**：`LocalServer` 的 5 参构造多了一个 `preferredPort`，`MainActivity` 从 SharedPreferences（`card_tree_mobile / local_port`）读上次的端口，先试绑、失败才回退随机端口，成功后写回。这一点是必须的——WebView 的 IndexedDB 按「scheme + host + port」隔离，端口每次都变就等于每次都是新 App，项目会全部看不见。
 - **自动备份**：`NativeBridge.saveAutoBackup(json)` 走原生侧写文件（Android 10+ 用 MediaStore 写「下载 / CardTree / backups」，旧系统写应用外部目录），按文件名时间戳滚动保留最近 30 份；网页侧在数据变化后由 `App.tsx` 的 effect 触发（退到后台 / `pagehide` / 每 5 分钟，且只在有改动时写）。
@@ -192,7 +195,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 
 | 项目 | 结果 |
 | --- | --- |
-| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='10' versionName='0.3.9'`，minSdk 26 / targetSdk 34，`INTERNET` 权限，label「卡片树」，5 个密度图标齐全 |
+| `aapt2 dump badging` | `package: name='com.cardtree.mobile' versionCode='11' versionName='0.3.12'`，minSdk 26 / targetSdk 34，`INTERNET` + `POST_NOTIFICATIONS` 权限，label「卡片树」，5 个密度图标齐全 |
 | `apksigner verify` | release APK 由 `android/app/card-tree-release.jks` 签名（v2 方案），证书 DN `CN=CardTree Mobile` —— 不是 debug 证书 |
 | APK 内容 | 167 个条目，其中 156 个是 `assets/www/**`：`index.html`、`manifest.webmanifest`、`icon-180/192/512.png`、单个 hash 化的 `static/js/main.*.js` + `static/css/main.*.css` + KaTeX 字体 |
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
@@ -207,6 +210,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | **卡片合并（0.3.7，纯网页层）** | CDP 端到端三链路全验：卡片操作行「合并」chip 与长按菜单「并入另一张卡…」两个入口都真跑——IndexedDB 逐项核对源卡删除、追问转移、子卡改挂目标卡、引用去重合并、其它卡对源卡的引用改指目标卡；合并后正看源卡自动回树。**顺带修真 bug**：长按抬手的合成 click 会落在刚打开浮层的遮罩上把菜单立刻关掉（Sheet 加 350ms 打开宽容期，`Input.dispatchTouchEvent` hold 700ms 复现验证） |
 | **流式跟随 / 浮动按钮 / 左右滑（0.3.8，纯网页层）** | CDP 全验：滚动后跳底钮出现、两态切换（跳底 atBottomGap:0 / 跳顶 top:0）、树右滑开抽屉、抽屉右滑关、卡右滑回树、树左滑回最近卡、卡左滑开全览、按住期间流式不拉走滚动位置；追问区的「正在搜索…」350ms 可见、搜索结束消失。**顺带修真 bug**：0.3.5 起的跟随拉回底部（scroll/resize 监听挂在 `ready=false` 时刻从未生效——`mainRef.current=null` 时挂了个空；0.3.8 改为 `ready` 后挂并加 `userTouchRef` 按住即停）。**测试坑**：CDP touch 起点 x<80 会触发 Chrome 历史导航手势把页面导走，起点要 ≥100 |
 | **原生联网搜索（0.3.9，壳改动）** | 三层验证：①中继真实冒烟（`POST /api/deepseek/messages` → 200 SSE，`server_tool_use` 1 次、`web_search_tool_result` 10 条来源、`text_delta` 55 段、首字 1635ms、总 2062ms）；②APK JVM harness（`handleAnthropic` 直连上游：200、2 轮搜索、10 条来源、48 段正文流式、`System.exit(0)` 干净退出）；③CDP e2e（localStorage 切 provider=deepseek → 开联网 pill → 发追问 → 900ms 显示「正在搜索…」→ 16s 完成，`followUp.search` 落库 5 条来源、回答带 `[1][2][3][4]` 引用、UI「联网搜索 · 5 条来源」）。**顺带改进**：上下文预算改按 `/models` 真实窗口算（deepseek-flash 1M → 预算约 55 万 token，此前写死 32K） |
+| **回答完成通知（0.3.12，壳改动）** | 桌面 JVM harness 三断言（慢速分块假上游经 `providerBase` 测试缝注入）：①正常读完 → 回调触发一次、带 provider id（`NORMAL_DONE=true EVENTS=[opencode]`）；②流式中途 `disconnect()`（= 点停止语义）→ **不触发**（`STOP_NO_NOTIFY=true TOTAL=1`，假上游须分块慢发——一次性发完时断开前转发已完成，属合理竞态）；③`setChatDoneListener(null)` → 不炸（`NULL_LISTENER_OK=true`）。MainActivity 通知构造 / `POST_NOTIFICATIONS` 权限请求（SDK>=33，requestCode 1002）/ `resumed` 守卫过了 gradle 编译与 `aapt2` 权限校验；通知实际弹出效果待真机走查 |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 
@@ -229,3 +233,4 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 - **升级后界面没变**：`gradle assembleDebug` 会重新复制 `app/dist` 并清空旧资源；确认先跑了 `pnpm build`。
 - **「检查更新」一直失败 / 下载不动**：检查更新走 `api.github.com`（匿名限流 60 次/小时/IP，一般够用，被限流会提示「访问太频繁」）；下载走 GitHub 的文件 CDN（`objects.githubusercontent.com`），国内网络偶尔拉不动——0.3.6 起可以在「设置 → 关于 → 下载镜像」填一个加速前缀（如 `https://ghproxy.net/`），镜像失败会自动改回直连重试一次；拉不动就留在当前版本下次再试，不影响使用。仓库必须是 public，private 会让检查一直 404。
 - **分享长图找不到**：和导出备份同目录——Android 10+ 在「下载/CardTree」，更老系统在应用外部 Documents 目录；文件名 `card-<时间>-<标题>.png`。网页版点「分享」是直接触发浏览器下载。
+- **没弹通知（0.3.12）**：先看系统设置里「卡片树」的通知权限是否开启（Android 13+ 第一次启动会弹请求，拒绝了就这里开）；国产 ROM 还要看省电策略有没有限制后台——App 被杀死时自然不会有通知，但流式快照 + 「继续生成」仍兜底。前台用 App 时不弹是设计内（`resumed` 守卫），只有退到后台才提醒。

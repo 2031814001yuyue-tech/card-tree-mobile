@@ -199,7 +199,7 @@ const WebUpdate = () => {
       <div className={styles.backupInfo}>
         <span className={styles.label}>网页层版本</span>
         <span className={styles.count}>
-          {webVersion ?? nativeVersion() ?? '0.3.11'}
+          {webVersion ?? nativeVersion() ?? '0.3.12'}
           {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
         </span>
       </div>
@@ -294,7 +294,7 @@ export const SettingsSheet = ({
     }
   }, [open, provider, providersReady])
 
-  const version = nativeVersion() ?? '0.3.11'
+  const version = nativeVersion() ?? '0.3.12'
 
   // 模型列表还没回来时，也把当前模型显示出来；hint 标注能力（能看图 / 上下文）
   const options: ModelInfo[] = models.some((item) => item.id === settings.model)
@@ -639,6 +639,19 @@ export const SettingsSheet = ({
             ? '数据保存在这个 App 自己的本地存储里；卸载 App 会一起删除，重要项目记得导出备份。'
             : '数据保存在浏览器 IndexedDB 里；换浏览器、清理网站数据都会丢失，重要项目记得导出备份。'}
         </p>
+        {!native && typeof Notification !== 'undefined' && Notification.permission !== 'granted' ? (
+          <button
+            type="button"
+            className={styles.actionButton}
+            onClick={() => {
+              void Notification.requestPermission().then((result) => {
+                showToast(result === 'granted' ? '通知已开启：App 退到后台后回答完成会提醒你' : '没有授权，跳过；之后想要可以再来这里点')
+              })
+            }}
+          >
+            开启系统通知（回答完成提醒）
+          </button>
+        ) : null}
         {native ? <WebUpdate /> : null}
       </section>
     </Sheet>
