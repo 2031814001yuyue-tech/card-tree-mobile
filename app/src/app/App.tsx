@@ -101,6 +101,7 @@ export const App = () => {
   const clearAll = useStore((state) => state.clearAll)
   const setProjectSystem = useStore((state) => state.setProjectSystem)
   const continueCard = useStore((state) => state.continueCard)
+  const continueFollowUp = useStore((state) => state.continueFollowUp)
   const editCard = useStore((state) => state.editCard)
   const editFollowUp = useStore((state) => state.editFollowUp)
   const backupNow = useStore((state) => state.backupNow)
@@ -842,6 +843,7 @@ export const App = () => {
             }
             onEdit={() => openEdit(card.id)}
             onEditFollowUp={(followUpId) => openEdit(card.id, followUpId)}
+            onContinueFollowUp={(followUpId) => continueFollowUp(card.id, followUpId)}
             onShare={() => handleShareCard(card.id)}
             onContinue={() => continueCard(card.id)}
             onMerge={() => setMergeSourceId(card.id)}

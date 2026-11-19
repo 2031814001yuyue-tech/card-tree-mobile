@@ -200,6 +200,8 @@ export type CardViewProps = {
   onEdit: () => void
   /** 只改某条追问的问题 / 回答文字，不重新调用模型 */
   onEditFollowUp: (followUpId: string) => void
+  /** 从中断处接着生成这条追问（仅 partial） */
+  onContinueFollowUp: (followUpId: string) => void
   /** 把这张卡片（问题 + 回答 + 来源）生成长图分享 */
   onShare: () => void
   /** 从中断处接着生成（仅 partial 卡片） */
@@ -223,6 +225,7 @@ export const CardView = ({
   onDelete,
   onEdit,
   onEditFollowUp,
+  onContinueFollowUp,
   onShare,
   onContinue,
   onMerge,
@@ -416,6 +419,20 @@ export const CardView = ({
                   ) : null}
                   {followUp.status === 'error' && followUp.error ? (
                     <p className={styles.errorText}>{followUp.error}</p>
+                  ) : null}
+                  {followUp.status === 'partial' && !followLive && followUp.answer.trim() ? (
+                    <div className={styles.partialBox}>
+                      <p className={styles.partialText}>
+                        这条追问的回答被中断了，已经写出的内容还在。可以接着往下写，不用重问一遍。
+                      </p>
+                      <Button
+                        size="s"
+                        variant="outlined"
+                        onClick={() => onContinueFollowUp(followUp.id)}
+                      >
+                        继续生成
+                      </Button>
+                    </div>
                   ) : null}
                   <SourceList search={followUp.search} />
                   <div className={styles.followUpFoot}>

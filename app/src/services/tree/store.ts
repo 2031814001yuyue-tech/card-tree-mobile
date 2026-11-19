@@ -78,6 +78,8 @@ export type Store = {
   retry: (cardId: string) => void
   /** partial 卡片：把已生成的文本带进上下文，让模型接着往下写 */
   continueCard: (cardId: string) => void
+  /** partial 追问：把已生成的文本带进上下文，让模型接着往下写 */
+  continueFollowUp: (cardId: string, followUpId: string) => void
   stop: () => void
 
   deleteCard: (cardId: string) => void
@@ -290,6 +292,20 @@ export const useStore = create<Store>((set, get) => {
     let failure: unknown = null
     const finalAnswer = () => prefix + answer
     const nativeSources: SearchSource[] = []
+    // 流式期间每 3 秒把已生成的文字快照落库：App 退到后台被系统杀掉（或网页被冻结）
+    // 后重启，卡片已带着大半回答，normalizeProject 会把 running 收敛成「已中断」（partial），
+    // 直接点「继续生成」接着写，不至于整段丢失。
+    const snapshotTimer = setInterval(() => {
+      const snapshotAnswer = finalAnswer()
+      if (!snapshotAnswer && !thinking) {
+        return
+      }
+      commit((current) =>
+        followUpId
+          ? model.writeFollowUp(current, cardId, followUpId, { answer: snapshotAnswer, thinking })
+          : model.writeAnswer(current, cardId, { answer: snapshotAnswer, thinking }),
+      )
+    }, 3000)
     try {
       if (nativeSearch) {
         for await (const event of streamNativeSearchChat(
@@ -344,6 +360,7 @@ export const useStore = create<Store>((set, get) => {
     } catch (error) {
       failure = error
     }
+    clearInterval(snapshotTimer)
 
     // 原生模式：把这一轮流里搜到的来源写到卡片上（结束时一次写，流中不抢渲染）
     if (nativeSearch && nativeSources.length > 0) {
@@ -647,6 +664,20 @@ export const useStore = create<Store>((set, get) => {
         return
       }
       void run(cardId, null, { continueFrom: card.answer })
+    },
+
+    continueFollowUp: (cardId, followUpId) => {
+      const state = get()
+      const project = activeProject(state)
+      if (!project || state.running) {
+        return
+      }
+      const card = model.cardById(project, cardId)
+      const followUp = card?.followUps.find((item) => item.id === followUpId) ?? null
+      if (!followUp || followUp.status !== 'partial' || !followUp.answer.trim()) {
+        return
+      }
+      void run(cardId, followUpId, { continueFrom: followUp.answer })
     },
 
     stop: () => {
