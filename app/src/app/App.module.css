@@ -84,6 +84,15 @@
   transform: rotate(180deg);
 }
 
+/* 内容区（main + 浮动按钮）：position 给绝对定位的跳转按钮当参照，它就不会压到底部输入框 */
+.content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .main {
   flex: 1;
   min-height: 0;
@@ -98,9 +107,9 @@
 
 /* 浮动跳转按钮（仿 DeepSeek 手机端）：不在底部 = 跳到底；已在底部 = 跳回顶 */
 .jumpButton {
-  position: fixed;
+  position: absolute;
   right: calc(14px + env(safe-area-inset-right));
-  bottom: calc(96px + env(safe-area-inset-bottom));
+  bottom: calc(14px + env(safe-area-inset-bottom));
   width: 40px;
   height: 40px;
   border-radius: 50%;

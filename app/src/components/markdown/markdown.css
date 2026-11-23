@@ -338,12 +338,19 @@
   font: var(--dsl-code-block-content-font);
   padding: 16px;
   margin: 0 !important;
-  white-space: pre-wrap;
-  word-break: break-all;
+  /* 代码块按原样保留换行、行内横向滚动：ASCII 图/对齐的表格不会被自动折行拆坏
+     （用户反馈：竖排流程图里的「AOV 网 ——…」被折断、关键词被拆成两行） */
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .markdown-table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .md-code-block-switch {

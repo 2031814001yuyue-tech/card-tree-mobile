@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { runKey } from '../../services/tree/live.js'
 import type { LiveText } from '../../services/tree/live.js'
 import type { Attachment, Card, CardMode, CardSearch, Project } from '../../services/tree/types.js'
 import { formatBytes } from '../../services/attachments.js'
@@ -191,7 +192,8 @@ type ActionItem = {
 export type CardViewProps = {
   project: Project
   card: Card
-  live: LiveText | null
+  /** 所有正在跑的轮次（一张卡的主回答和每条追问可以同时跑），键见 live.ts 的 runKey */
+  liveById: Record<string, LiveText>
   running: boolean
   onBranch: () => void
   onRetry: () => void
@@ -218,7 +220,7 @@ export type CardViewProps = {
 export const CardView = ({
   project,
   card,
-  live,
+  liveById,
   running,
   onBranch,
   onRetry,
@@ -234,7 +236,7 @@ export const CardView = ({
   onAddRef,
   onOpenCard,
 }: CardViewProps) => {
-  const mainLive = live && live.cardId === card.id && live.followUpId === null ? live : null
+  const mainLive = liveById[runKey(card.id, null)] ?? null
   const answer = mainLive ? mainLive.answer : card.answer
   const thinking = mainLive ? mainLive.thinking : card.thinking
   const status: Card['status'] = mainLive ? 'running' : card.status
@@ -389,8 +391,7 @@ export const CardView = ({
           </div>
           <div className={styles.followUps}>
             {card.followUps.map((followUp) => {
-              const followLive =
-                live && live.cardId === card.id && live.followUpId === followUp.id ? live : null
+              const followLive = liveById[runKey(card.id, followUp.id)] ?? null
               const followAnswer = followLive ? followLive.answer : followUp.answer
               const followThinking = followLive ? followLive.thinking : followUp.thinking
               return (

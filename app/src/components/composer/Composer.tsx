@@ -85,7 +85,8 @@ export const Composer = ({
   }, [autoFocus, disabled])
 
   const hasAttachment = attachments.length > 0
-  const canSend = !disabled && !running && (value.trim().length > 0 || hasAttachment)
+  // 生成中也能发：一张卡可以同时跑好几轮（边等这个，边问别的）
+  const canSend = !disabled && (value.trim().length > 0 || hasAttachment)
 
   const submit = () => {
     if (!canSend) {
@@ -109,7 +110,7 @@ export const Composer = ({
                   aria-checked={item.mode === mode}
                   className={clsx(styles.mode, item.mode === mode && styles.modeActive)}
                   onClick={() => onModeChange?.(item.mode)}
-                  disabled={running}
+                  disabled={disabled}
                 >
                   {item.label}
                 </button>
@@ -127,7 +128,7 @@ export const Composer = ({
               aria-pressed={searchOn}
               aria-label={searchAvailable ? '联网搜索' : '联网搜索（未开通）'}
               onClick={onToggleSearch}
-              disabled={running}
+              disabled={disabled}
             >
               <IconSearchOutline16 />
               <span>{searchAvailable ? '联网搜索' : '联网（未开通）'}</span>
@@ -169,7 +170,7 @@ export const Composer = ({
           className={clsx(styles.attach, !onAddFiles && styles.attachHidden)}
           aria-label="添加图片或文件"
           onClick={() => fileRef.current?.click()}
-          disabled={disabled || running}
+          disabled={disabled}
         >
           <IconPaperclipOutline16 />
         </button>
@@ -217,17 +218,16 @@ export const Composer = ({
           >
             <IconStopFill16 />
           </button>
-        ) : (
-          <button
-            type="button"
-            className={styles.action}
-            onClick={submit}
-            disabled={!canSend}
-            aria-label="发送"
-          >
-            <IconSendOutline16 />
-          </button>
-        )}
+        ) : null}
+        <button
+          type="button"
+          className={styles.action}
+          onClick={submit}
+          disabled={!canSend}
+          aria-label="发送"
+        >
+          <IconSendOutline16 />
+        </button>
       </div>
     </div>
   )

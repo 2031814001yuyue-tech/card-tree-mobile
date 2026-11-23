@@ -69,8 +69,8 @@ export const App = () => {
   const activeProjectId = useStore((state) => state.activeProjectId)
   const view = useStore((state) => state.view)
   const activeCardId = useStore((state) => state.activeCardId)
-  const live = useStore((state) => state.live)
-  const running = useStore((state) => state.running)
+  const liveById = useStore((state) => state.live)
+  const runningById = useStore((state) => state.running)
   const models = useStore((state) => state.models)
   const modelsLoading = useStore((state) => state.modelsLoading)
   const modelsError = useStore((state) => state.modelsError)
@@ -254,11 +254,11 @@ export const App = () => {
     if (!el) {
       return
     }
-    if (live && view === 'card' && followRef.current && !userTouchRef.current) {
+    if (Object.keys(liveById).length > 0 && view === 'card' && followRef.current && !userTouchRef.current) {
       el.scrollTop = el.scrollHeight
     }
     syncJumpState(el)
-  }, [live, view])
+  }, [liveById, view])
 
   // 左右滑切换（仿手机 App 的层级手势）：
   //   项目抽屉 ←[右滑] 树视图 [左滑]→ 卡片内容 [左滑]→ 全览
@@ -301,6 +301,25 @@ export const App = () => {
       pane.style.willChange = ''
       dragged = false
     }
+    /**
+     * 触摸起点落在「能横向滚动的区域」里（代码块、表格、宽公式）时不要切页：
+     * 用户是在拖内容看全，不是想翻页。输入类元素和选中文字同理。
+     */
+    const startsInScrollable = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) {
+        return false
+      }
+      let node: Element | null = target
+      while (node && node !== el) {
+        const style = window.getComputedStyle(node)
+        const scrollsX = /(auto|scroll)/.test(style.overflowX) && node.scrollWidth - node.clientWidth > 2
+        if (scrollsX) {
+          return true
+        }
+        node = node.parentElement
+      }
+      return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+    }
     const onTouchStart = (event: TouchEvent) => {
       userTouchRef.current = true
       if (event.touches.length !== 1) {
@@ -311,7 +330,9 @@ export const App = () => {
       startX = touch.clientX
       startY = touch.clientY
       horizontal = false
-      tracking = true
+      // 正在拖内容看全 / 在选文字：这次手势不归切页管
+      const selecting = Boolean(window.getSelection()?.toString())
+      tracking = !selecting && !startsInScrollable(event.target)
     }
     const onTouchMove = (event: TouchEvent) => {
       if (!tracking || event.touches.length !== 1) {
@@ -618,9 +639,12 @@ export const App = () => {
     () => (project && activeCardId ? project.cards.find((item) => item.id === activeCardId) ?? null : null),
     [project, activeCardId],
   )
-  const isRunning = running !== null
-  const cardRunning = Boolean(card && running && running.cardId === card.id)
-  const cardLive = card && live && live.cardId === card.id ? live : null
+  const runningTargets = Object.values(runningById)
+  const isRunning = runningTargets.length > 0
+  /** 这张卡上正在跑的轮次（主回答或某条追问），决定卡片操作按钮是否锁 */
+  const cardRunning = card !== null && runningTargets.some((item) => item.cardId === card.id)
+  /** 卡片视图底部要不要显示「停止」：这张卡有任何一轮在跑 */
+  const cardBusy = cardRunning
   /** 首次启动引导 Sheet 展示的订阅名 */
   const providerLabel = providerById(provider).label
 
@@ -818,6 +842,7 @@ export const App = () => {
         </div>
       </header>
 
+      <div className={styles.content}>
       <main className={styles.main} ref={mainRef}>
         <div
           ref={paneRef}
@@ -833,7 +858,7 @@ export const App = () => {
           <CardView
             project={project}
             card={card}
-            live={cardLive}
+            liveById={liveById}
             running={cardRunning}
             onBranch={() => branch(card.id)}
             onRetry={() => retry(card.id)}
@@ -854,8 +879,7 @@ export const App = () => {
         ) : (
           <TreeView
             project={project}
-            liveCardId={live?.cardId ?? null}
-            liveAnswer={live?.answer ?? ''}
+            liveById={liveById}
             onOpen={handleOpenCard}
             onQuickMenu={setQuickCardId}
           />
@@ -896,6 +920,7 @@ export const App = () => {
           </span>
         </button>
       ) : null}
+      </div>
 
       <footer className={styles.footer}>
         {view === 'card' && card ? (
@@ -904,7 +929,7 @@ export const App = () => {
             modes={ASK_MODES}
             mode={mode}
             onModeChange={setMode}
-            running={cardRunning}
+            running={cardBusy}
             attachments={draftAttachments}
             onAddFiles={addDraftFiles}
             onRemoveAttachment={removeDraftAttachment}
@@ -912,7 +937,7 @@ export const App = () => {
             searchOn={searchOn}
             onToggleSearch={toggleSearch}
             onSend={(text, nextMode) => ask(text, nextMode, takeDraft(), { search: searchOn })}
-            onStop={stop}
+            onStop={() => stop(card.id)}
           />
         ) : (
           <Composer
@@ -929,7 +954,7 @@ export const App = () => {
             searchOn={searchOn}
             onToggleSearch={toggleSearch}
             onSend={(text) => askRoot(text, takeDraft(), { search: searchOn })}
-            onStop={stop}
+            onStop={() => stop()}
           />
         )}
       </footer>

@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent } from 'react'
+import { runKey } from '../../services/tree/live.js'
+import type { LiveText } from '../../services/tree/live.js'
 import type { Card, CardMode, Project } from '../../services/tree/types.js'
 import { IconChevronRightOutline14, IconCloseOutline16, IconSearchOutline16 } from '../base/icons.js'
 import styles from './TreeView.module.css'
@@ -67,8 +69,8 @@ type NodeProps = {
   /** 收起来的分支（搜索时强制全部展开，忽略这个集合） */
   collapsed: Set<string>
   onToggleCollapse: (cardId: string) => void
-  liveCardId: string | null
-  liveAnswer: string
+  /** 所有正在跑的轮次（可以同时好几轮），键见 live.ts 的 runKey */
+  liveById: Record<string, LiveText>
   onOpen: (cardId: string) => void
   onQuickMenu?: (cardId: string) => void
 }
@@ -80,13 +82,13 @@ const Node = ({
   isVisible,
   collapsed,
   onToggleCollapse,
-  liveCardId,
-  liveAnswer,
+  liveById,
   onOpen,
   onQuickMenu,
 }: NodeProps) => {
-  const streaming = liveCardId === card.id
-  const answer = streaming ? liveAnswer : card.answer
+  const live = liveById[runKey(card.id, null)] ?? null
+  const streaming = live !== null
+  const answer = live ? live.answer : card.answer
   const status: Card['status'] = streaming ? 'running' : card.status
   const kidCount = childrenOf(card.id).filter((kid) => isVisible(kid.id)).length
   const folded = collapsed.has(card.id)
@@ -203,8 +205,7 @@ const Node = ({
               isVisible={isVisible}
               collapsed={collapsed}
               onToggleCollapse={onToggleCollapse}
-              liveCardId={liveCardId}
-              liveAnswer={liveAnswer}
+              liveById={liveById}
               onOpen={onOpen}
               onQuickMenu={onQuickMenu}
             />
@@ -217,15 +218,15 @@ const Node = ({
 
 export type TreeViewProps = {
   project: Project
-  liveCardId: string | null
-  liveAnswer: string
+  /** 所有正在跑的轮次（可以同时好几轮），键见 live.ts 的 runKey */
+  liveById: Record<string, LiveText>
   onOpen: (cardId: string) => void
   /** 长按卡片（或桌面右键）时弹出快捷菜单 */
   onQuickMenu?: (cardId: string) => void
 }
 
 /** 卡片树：每一层孩子挂在上张卡片的生长线上，点一张卡片进入详情 */
-export const TreeView = ({ project, liveCardId, liveAnswer, onOpen, onQuickMenu }: TreeViewProps) => {
+export const TreeView = ({ project, liveById, onOpen, onQuickMenu }: TreeViewProps) => {
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
   const [collapsed, setCollapsed] = useState<string[]>(() => readCollapsed())
@@ -344,8 +345,7 @@ export const TreeView = ({ project, liveCardId, liveAnswer, onOpen, onQuickMenu 
               isVisible={isVisible}
               collapsed={collapsedSet}
               onToggleCollapse={toggleCollapse}
-              liveCardId={liveCardId}
-              liveAnswer={liveAnswer}
+              liveById={liveById}
               onOpen={onOpen}
               onQuickMenu={onQuickMenu}
             />

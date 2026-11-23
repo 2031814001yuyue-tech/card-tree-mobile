@@ -30,6 +30,7 @@ import {
 import * as db from './db.js'
 import { downloadJson, exportAllProjectsJson, exportProjectJson, importDesktopState, importProjectJson } from './io.js'
 import * as model from './model.js'
+import { runKey } from './live.js'
 import type { LiveText } from './live.js'
 import type { Attachment, CardSearch, CardStats, Project, SearchSource } from './types.js'
 import { MAX_SEARCH_SOURCES } from './types.js'
@@ -42,7 +43,18 @@ export type RunOptions = { search?: boolean }
 
 export type View = 'tree' | 'card'
 
-type RunTarget = { cardId: string; followUpId: string | null }
+type RunTarget = {
+  /** 这一轮属于哪个项目：切走项目后它仍然写回自己那个项目 */
+  projectId: string
+  cardId: string
+  followUpId: string | null
+}
+
+/**
+ * 同时最多跑几轮：一张卡正在「深入」回答时，还可以从它长出新枝、追问别的，
+ * 但别让手机一次接十来个流把内存和额度都吃掉。
+ */
+const MAX_CONCURRENT_RUNS = 3
 
 /**
  * 网页版的完成通知（APK 里不发：Java 本地服务会在后台直接发系统通知，比网页层可靠）。
@@ -108,10 +120,10 @@ export type Store = {
   activeProjectId: string | null
   view: View
   activeCardId: string | null
-  /** 正在流式输出的文本（不落库） */
-  live: LiveText | null
-  /** 当前正在跑的那一轮 */
-  running: RunTarget | null
+  /** 正在流式输出的文本（不落库），按「轮次」分开存：可以同时有好几轮在跑 */
+  live: Record<string, LiveText>
+  /** 正在跑的那些轮次，键是 live 里的同一个 key */
+  running: Record<string, RunTarget>
   models: ModelInfo[]
   modelsLoading: boolean
   modelsError: string | null
@@ -139,7 +151,11 @@ export type Store = {
   continueCard: (cardId: string) => void
   /** partial 追问：把已生成的文本带进上下文，让模型接着往下写 */
   continueFollowUp: (cardId: string, followUpId: string) => void
-  stop: () => void
+  /**
+   * 停止生成：给定卡片（和追问）就只停那一轮的，不给就停全部。
+   * 一张卡可以同时跑「主回答」和若干条追问，所以不能只按卡片停。
+   */
+  stop: (cardId?: string, followUpId?: string | null) => void
 
   deleteCard: (cardId: string) => void
   /** 手动改卡片的问题 / 回答文字，不重新生成 */
@@ -211,7 +227,8 @@ const normalizeProject = (project: Project): Project => {
   return changed ? { ...project, cards } : project
 }
 
-let controller: AbortController | null = null
+/** 每一轮生成都有自己的 AbortController，键和 live/running 一致 */
+const controllers = new Map<string, AbortController>()
 
 export const useStore = create<Store>((set, get) => {
   /** 改动当前项目：更新内存 + 落库 */
@@ -229,20 +246,58 @@ export const useStore = create<Store>((set, get) => {
     return next
   }
 
-  const finish = (target: RunTarget, patch: Parameters<typeof model.writeAnswer>[2]) => {
-    controller = null
+  /**
+   * 改动指定项目：一轮生成可能在你切走项目之后才结束，
+   * 它必须写回自己那个项目，不能用「当前项目」。
+   */
+  const commitProject = (projectId: string, fn: (project: Project) => Project): Project | null => {
     const state = get()
-    const project = activeProject(state)
+    const project = state.projects.find((item) => item.id === projectId)
     if (!project) {
-      set({ running: null, live: null })
-      return
+      return null
     }
-    const next = target.followUpId
-      ? model.writeFollowUp(project, target.cardId, target.followUpId, patch)
-      : model.writeAnswer(project, target.cardId, patch)
-    set({ projects: replaceProject(state.projects, next), running: null, live: null })
+    const next = fn(project)
+    set({ projects: replaceProject(state.projects, next) })
     void db.saveProject(next).catch(() => {
       showToast('保存失败：浏览器存储可能已满')
+    })
+    return next
+  }
+
+  /** 只更新某一轮的流式文本，不动其它正在跑的轮次 */
+  const patchLive = (key: string, patch: Partial<Omit<LiveText, 'cardId' | 'followUpId'>>) => {
+    set((state) => {
+      const current = state.live[key]
+      if (!current) {
+        return {}
+      }
+      return { live: { ...state.live, [key]: { ...current, ...patch } } }
+    })
+  }
+
+  /** 从「按轮次分存」的 map 里去掉一轮 */
+  const withoutKey = <T,>(map: Record<string, T>, key: string): Record<string, T> =>
+    Object.fromEntries(Object.entries(map).filter(([itemKey]) => itemKey !== key))
+
+  const finish = (target: RunTarget, patch: Parameters<typeof model.writeAnswer>[2]) => {
+    const key = runKey(target.cardId, target.followUpId)
+    controllers.delete(key)
+    set((state) => {
+      const project = state.projects.find((item) => item.id === target.projectId)
+      if (!project) {
+        return {}
+      }
+      const next = target.followUpId
+        ? model.writeFollowUp(project, target.cardId, target.followUpId, patch)
+        : model.writeAnswer(project, target.cardId, patch)
+      void db.saveProject(next).catch(() => {
+        showToast('保存失败：浏览器存储可能已满')
+      })
+      return {
+        projects: replaceProject(state.projects, next),
+        live: withoutKey(state.live, key),
+        running: withoutKey(state.running, key),
+      }
     })
   }
 
@@ -253,7 +308,16 @@ export const useStore = create<Store>((set, get) => {
   ) => {
     const state = get()
     const project = activeProject(state)
-    if (!project || state.running) {
+    if (!project) {
+      return
+    }
+    const key = runKey(cardId, followUpId)
+    // 同一轮重复触发（双击「重答」之类）：已经在跑就别再开一条
+    if (state.running[key]) {
+      return
+    }
+    if (Object.keys(state.running).length >= MAX_CONCURRENT_RUNS) {
+      showToast(`同时最多 ${MAX_CONCURRENT_RUNS} 个回答在生成，等一个完成再问`)
       return
     }
     const card = model.cardById(project, cardId)
@@ -320,14 +384,25 @@ export const useStore = create<Store>((set, get) => {
         ]
       : messages
 
-    controller = new AbortController()
+    const projectId = project.id
+    const controller = new AbortController()
+    controllers.set(key, controller)
     const signal = controller.signal
-    const target: RunTarget = { cardId, followUpId }
+    const target: RunTarget = { projectId, cardId, followUpId }
     // 原生模式先亮「正在搜索…」，等模型吐第一段正文才熄灭
-    set({
-      running: target,
-      live: { cardId, followUpId, answer: prefix, thinking: '', ...(nativeSearch ? { searching: true } : {}) },
-    })
+    set((current) => ({
+      running: { ...current.running, [key]: target },
+      live: {
+        ...current.live,
+        [key]: {
+          cardId,
+          followUpId,
+          answer: prefix,
+          thinking: '',
+          ...(nativeSearch ? { searching: true } : {}),
+        },
+      },
+    }))
 
     let answer = ''
     let thinking = ''
@@ -342,7 +417,7 @@ export const useStore = create<Store>((set, get) => {
       if (!snapshotAnswer && !thinking) {
         return
       }
-      commit((current) =>
+      commitProject(projectId, (current) =>
         followUpId
           ? model.writeFollowUp(current, cardId, followUpId, { answer: snapshotAnswer, thinking })
           : model.writeAnswer(current, cardId, { answer: snapshotAnswer, thinking }),
@@ -361,7 +436,7 @@ export const useStore = create<Store>((set, get) => {
           },
           {
             onSearching: () => {
-              set({ live: { cardId, followUpId, answer: finalAnswer(), thinking, searching: true } })
+              patchLive(key, { answer: finalAnswer(), thinking, searching: true })
             },
             onSources: (sources) => {
               for (const source of sources) {
@@ -378,7 +453,12 @@ export const useStore = create<Store>((set, get) => {
             thinking = event.text
           }
           if (event.type === 'text' || event.type === 'thinking') {
-            set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+            patchLive(key, {
+              answer: finalAnswer(),
+              thinking,
+              searching: false,
+              searchingQuery: undefined,
+            })
           }
         }
       } else {
@@ -421,7 +501,12 @@ export const useStore = create<Store>((set, get) => {
             if (event.type === 'text' || event.type === 'thinking') {
               answer = roundText
               thinking = roundThinking
-              set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+              patchLive(key, {
+                answer: finalAnswer(),
+                thinking,
+                searching: false,
+                searchingQuery: undefined,
+              })
             }
           }
           answer = roundText
@@ -443,15 +528,11 @@ export const useStore = create<Store>((set, get) => {
                 buildSearchQuery(project, card, followUp, question)
               toolQueries.push(query)
               // 模型自己要搜：先亮「正在搜索「…」」，搜完再让它接着写
-              set({
-                live: {
-                  cardId,
-                  followUpId,
-                  answer: finalAnswer(),
-                  thinking,
-                  searching: true,
-                  searchingQuery: query,
-                },
+              patchLive(key, {
+                answer: finalAnswer(),
+                thinking,
+                searching: true,
+                searchingQuery: query,
               })
               try {
                 const outcome = await searchWeb(base, query, { oriQuestion: question })
@@ -474,7 +555,7 @@ export const useStore = create<Store>((set, get) => {
               ...toolMessages,
             )
             rounds += 1
-            set({ live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
+            patchLive(key, { answer: '', thinking: '', searching: true, searchingQuery: undefined })
           }
         } catch (error) {
           if (!toolMode || !isToolRejection(error)) {
@@ -484,9 +565,7 @@ export const useStore = create<Store>((set, get) => {
           markToolLess(provider)
           toolMode = false
           const fallbackQuery = buildSearchQuery(project, card, followUp, question)
-          set({
-            live: { cardId, followUpId, answer: '', thinking: '', searching: true, searchingQuery: fallbackQuery },
-          })
+          patchLive(key, { answer: '', thinking: '', searching: true, searchingQuery: fallbackQuery })
           try {
             const outcome = await searchWeb(base, fallbackQuery, { oriQuestion: question })
             collectSources(outcome.sources)
@@ -510,7 +589,7 @@ export const useStore = create<Store>((set, get) => {
             sources: toolSources.slice(0, MAX_SEARCH_SOURCES),
             searchedAt: Date.now(),
           }
-          commit((current) => model.setSearch(current, cardId, followUpId, searchResult))
+          commitProject(projectId, (current) => model.setSearch(current, cardId, followUpId, searchResult))
         }
       }
     } catch (error) {
@@ -525,7 +604,7 @@ export const useStore = create<Store>((set, get) => {
         sources: nativeSources.slice(0, MAX_SEARCH_SOURCES),
         searchedAt: Date.now(),
       }
-      commit((current) => model.setSearch(current, cardId, followUpId, nativeSearchResult))
+      commitProject(projectId, (current) => model.setSearch(current, cardId, followUpId, nativeSearchResult))
     }
 
     if (signal.aborted) {
@@ -570,8 +649,8 @@ export const useStore = create<Store>((set, get) => {
     activeProjectId: null,
     view: 'tree',
     activeCardId: null,
-    live: null,
-    running: null,
+    live: {},
+    running: {},
     models: [],
     modelsLoading: false,
     modelsError: null,
@@ -622,25 +701,22 @@ export const useStore = create<Store>((set, get) => {
 
     selectProject: (projectId) => {
       const state = get()
-      if (state.running || !state.projects.some((project) => project.id === projectId)) {
+      if (!state.projects.some((project) => project.id === projectId)) {
         return
       }
-      set({ activeProjectId: projectId, view: 'tree', activeCardId: null, live: null })
+      // 别的项目里还在跑的回答不受影响：它们按 projectId 写回自己那个项目
+      set({ activeProjectId: projectId, view: 'tree', activeCardId: null })
       void db.saveActiveProjectId(projectId)
     },
 
     createProject: () => {
       const state = get()
-      if (state.running) {
-        return
-      }
       const project = model.createProject()
       set({
         projects: [project, ...state.projects],
         activeProjectId: project.id,
         view: 'tree',
         activeCardId: null,
-        live: null,
       })
       void db.saveProject(project)
       void db.saveActiveProjectId(project.id)
@@ -678,8 +754,11 @@ export const useStore = create<Store>((set, get) => {
 
     deleteProject: (projectId) => {
       const state = get()
-      if (state.running) {
-        return
+      // 这个项目里正在跑的轮次先停掉：否则它们结束时会写回一个已经不存在的项目
+      for (const [key, target] of Object.entries(state.running)) {
+        if (target.projectId === projectId) {
+          controllers.get(key)?.abort()
+        }
       }
       const rest = state.projects.filter((project) => project.id !== projectId)
       void db.deleteProject(projectId)
@@ -716,7 +795,7 @@ export const useStore = create<Store>((set, get) => {
       const state = get()
       const project = activeProject(state)
       const prompt = text.trim()
-      if (!project || !prompt || state.running) {
+      if (!project || !prompt) {
         return
       }
       const mode = project.cards.length ? ('isolated' as const) : ('root' as const)
@@ -740,7 +819,7 @@ export const useStore = create<Store>((set, get) => {
       const project = activeProject(state)
       const cardId = state.activeCardId
       const prompt = text.trim()
-      if (!project || !cardId || !prompt || state.running) {
+      if (!project || !cardId || !prompt) {
         return
       }
       const card = model.cardById(project, cardId)
@@ -775,7 +854,7 @@ export const useStore = create<Store>((set, get) => {
     branch: (cardId) => {
       const state = get()
       const project = activeProject(state)
-      if (!project || state.running) {
+      if (!project) {
         return
       }
       const card = model.cardById(project, cardId)
@@ -800,7 +879,7 @@ export const useStore = create<Store>((set, get) => {
     retry: (cardId) => {
       const state = get()
       const project = activeProject(state)
-      if (!project || state.running) {
+      if (!project) {
         return
       }
       const card = model.cardById(project, cardId)
@@ -813,7 +892,7 @@ export const useStore = create<Store>((set, get) => {
     continueCard: (cardId) => {
       const state = get()
       const project = activeProject(state)
-      if (!project || state.running) {
+      if (!project) {
         return
       }
       const card = model.cardById(project, cardId)
@@ -826,7 +905,7 @@ export const useStore = create<Store>((set, get) => {
     continueFollowUp: (cardId, followUpId) => {
       const state = get()
       const project = activeProject(state)
-      if (!project || state.running) {
+      if (!project) {
         return
       }
       const card = model.cardById(project, cardId)
@@ -837,14 +916,33 @@ export const useStore = create<Store>((set, get) => {
       void run(cardId, followUpId, { continueFrom: followUp.answer })
     },
 
-    stop: () => {
-      controller?.abort()
+    stop: (cardId, followUpId) => {
+      if (cardId === undefined) {
+        // 不给目标：停掉所有正在跑的轮次
+        for (const item of controllers.values()) {
+          item.abort()
+        }
+        return
+      }
+      if (followUpId === undefined) {
+        // 只给卡片：停这张卡的主回答 + 它所有追问的回答
+        for (const [key, target] of Object.entries(get().running)) {
+          if (target.cardId === cardId) {
+            controllers.get(key)?.abort()
+          }
+        }
+        return
+      }
+      controllers.get(runKey(cardId, followUpId))?.abort()
     },
 
     deleteCard: (cardId) => {
       const state = get()
-      if (state.running?.cardId === cardId) {
-        controller?.abort()
+      // 这张卡上正在跑的轮次（主回答 / 追问）先停掉，别让它们写回已经删掉的卡
+      for (const [key, target] of Object.entries(state.running)) {
+        if (target.cardId === cardId) {
+          controllers.get(key)?.abort()
+        }
       }
       const next = commit((project) => model.removeCard(project, cardId))
       if (!next) {
@@ -974,7 +1072,10 @@ export const useStore = create<Store>((set, get) => {
     },
 
     clearAll: async () => {
-      controller?.abort()
+      for (const item of controllers.values()) {
+        item.abort()
+      }
+      controllers.clear()
       await db.clearAll()
       const project = model.createProject()
       set({
@@ -982,8 +1083,8 @@ export const useStore = create<Store>((set, get) => {
         activeProjectId: project.id,
         view: 'tree',
         activeCardId: null,
-        live: null,
-        running: null,
+        live: {},
+        running: {},
       })
       await db.saveProject(project)
       await db.saveActiveProjectId(project.id)
