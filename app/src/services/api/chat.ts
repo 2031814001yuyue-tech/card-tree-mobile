@@ -8,7 +8,13 @@
  * 这个文件只做两件事：拼请求、解析 SSE；往上抛的错误统一是 `ApiError`。
  */
 
-import { ApiError, type ChatRequest, type ModelInfo, type StreamEvent } from './types.js'
+import {
+  ApiError,
+  type ChatRequest,
+  type ChatToolCall,
+  type ModelInfo,
+  type StreamEvent,
+} from './types.js'
 import { PROVIDER_HEADER, providerById } from './providers.js'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -244,6 +250,9 @@ export async function* streamChat(
     ...(sendEffort && request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
+    ...(request.tools && request.tools.length > 0
+      ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }
+      : {}),
   }
 
   const headers: Record<string, string> = {
@@ -281,6 +290,8 @@ export async function* streamChat(
   let thinking = ''
   let finishReason: string | null = null
   let sawData = false
+  // 工具调用的参数是分片流式吐出来的：按 index 归并，等流结束再拼成完整调用
+  const pendingCalls = new Map<number, ChatToolCall>()
 
   try {
     for await (const data of readSseData(response.body)) {
@@ -318,6 +329,33 @@ export async function* streamChat(
             text += delta.content
             yield { type: 'text', text }
           }
+          // 工具调用：id/name 通常只在第一片出现，arguments 会分很多片
+          if (Array.isArray(delta.tool_calls)) {
+            for (const raw of delta.tool_calls) {
+              if (!isRecord(raw)) {
+                continue
+              }
+              const index = toFiniteNumber(raw.index) ?? pendingCalls.size
+              const existing = pendingCalls.get(index) ?? {
+                id: '',
+                type: 'function' as const,
+                function: { name: '', arguments: '' },
+              }
+              if (typeof raw.id === 'string' && raw.id.length > 0) {
+                existing.id = raw.id
+              }
+              const fn = isRecord(raw.function) ? raw.function : null
+              if (fn) {
+                if (typeof fn.name === 'string' && fn.name.length > 0) {
+                  existing.function.name = fn.name
+                }
+                if (typeof fn.arguments === 'string') {
+                  existing.function.arguments += fn.arguments
+                }
+              }
+              pendingCalls.set(index, existing)
+            }
+          }
         }
         if (typeof choice.finish_reason === 'string' && choice.finish_reason.length > 0) {
           finishReason = choice.finish_reason
@@ -345,6 +383,19 @@ export async function* streamChat(
 
   if (!sawData) {
     throw new ApiError('stream', '连接中断，没有收到回答')
+  }
+  if (pendingCalls.size > 0) {
+    const calls = [...pendingCalls.entries()]
+      .sort((left, right) => left[0] - right[0])
+      .map(([, call], index) => ({
+        ...call,
+        // 少数实现不给 id：补一个稳定的本地 id，tool 消息要靠它配对
+        id: call.id || `call_${index}_${Date.now()}`,
+      }))
+      .filter((call) => call.function.name.length > 0)
+    if (calls.length > 0) {
+      yield { type: 'toolCalls', calls }
+    }
   }
   yield { type: 'done', finishReason }
 }

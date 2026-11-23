@@ -13,9 +13,9 @@ import { showToast } from '../../components/base/toastState.js'
 import { fetchModels, normalizeApiBase, streamChat } from '../api/chat.js'
 import { streamNativeSearchChat } from '../api/anthropic.js'
 import { ApiError } from '../api/types.js'
-import type { ChatMessage, ModelInfo } from '../api/types.js'
+import type { ChatMessage, ChatToolCall, ModelInfo } from '../api/types.js'
 import { isNativeApp, saveNativeAutoBackup, saveNativeBackup } from '../native.js'
-import { searchWeb } from '../search.js'
+import { WEB_SEARCH_TOOL, formatToolResult, parseSearchQuery, searchWeb } from '../search.js'
 import { useSettings } from '../settings.js'
 import {
   FALLBACK_CONTEXT_WINDOW,
@@ -61,6 +61,45 @@ const notifyAnswerDone = (question: string) => {
   } catch {
     // 个别浏览器构造 Notification 会抛（策略/上下文变化）：忽略
   }
+}
+
+/**
+ * 联网搜索「工具循环」的限度：最多让模型连续搜 2 轮（每轮最多 2 次搜索），
+ * 避免模型反复搜不停把时间/额度耗光。第三轮起只让它直接回答。
+ */
+const MAX_TOOL_ROUNDS = 2
+
+/** 有些订阅（或模型的某些版本）没有 function calling：按「订阅 id」记住，别再试 */
+const TOOL_LESS_KEY = 'card-tree:tool-less'
+
+const readToolLess = (): string[] => {
+  try {
+    const raw = localStorage.getItem(TOOL_LESS_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+const markToolLess = (provider: string) => {
+  try {
+    const list = readToolLess()
+    if (!list.includes(provider)) {
+      localStorage.setItem(TOOL_LESS_KEY, JSON.stringify([...list, provider]))
+    }
+  } catch {
+    // 存不进去也无所谓：下次再试一次工具而已
+  }
+}
+
+/** 上游明确拒绝工具调用（400/422 且提到 tool/function）时算「这家不支持工具」 */
+const isToolRejection = (error: unknown): boolean => {
+  if (!(error instanceof ApiError)) {
+    return false
+  }
+  const status = error.status ?? 0
+  return (status === 400 || status === 404 || status === 422) && /tool|function/i.test(error.message)
 }
 
 export type Store = {
@@ -229,41 +268,19 @@ export const useStore = create<Store>((set, get) => {
     const settings = useSettings.getState()
     const question = String(followUp ? followUp.prompt : card.prompt).trim()
 
-    // 联网搜索分两种：
+    // 联网搜索分三种，机制不一样：
     // - DeepSeek 官方订阅 = 原生模式：走 Anthropic 协议 + web_search 服务端工具，
     //   模型自己决定搜什么、搜几轮，搜索穿插在流式回答里（和 DeepSeek 手机端同款）；
     //   来源在流里收集，结束后写到卡片上。
-    // - 其它订阅 = 前置模式：先调 Search API 拿摘要拼进上下文再一次问模型。
-    // 前置模式搜索失败只提示一声，仍按不联网继续回答。
+    // - 其它订阅 = 工具循环：带上 web_search 工具问一次，模型先吐 tool_calls，
+    //   App 调 Search API 再把结果作为 tool 消息塞回去，模型基于结果继续回答（最多两轮）。
+    // - 不支持工具的订阅 = 退回前置搜索：先把问题补全成搜索词搜一次，摘要拼进上下文再问。
     const nativeSearch =
       options?.search === true && question.length > 0 && settings.provider === 'deepseek'
-    let searchResult: CardSearch | null = null
-    if (options?.search && question && !nativeSearch) {
-      controller = null
-      // 搜索词带上上下文：光拿「举个例子」去搜会完全跑偏（DeepSeek 手机端是模型自己决定搜什么，
-      // 前置模式没有这个能力，只能先把问题补全成一句搜索引擎能懂的话）
-      const searchQuery = buildSearchQuery(project, card, followUp, question)
-      // searching:true 让卡片先显示「正在搜索…」，来源落卡后开始流式时自然消失
-      set({ running: { cardId, followUpId }, live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
-      try {
-        const outcome = await searchWeb(normalizeApiBase(settings.apiBase), searchQuery, {
-          oriQuestion: question,
-        })
-        searchResult = { query: outcome.query, sources: outcome.sources, searchedAt: Date.now() }
-        commit((current) => model.setSearch(current, cardId, followUpId, searchResult))
-      } catch (error) {
-        showToast(
-          error instanceof ApiError
-            ? `联网搜索失败：${error.message}`
-            : '联网搜索失败，这次先按不联网回答',
-        )
-      }
-    }
-    // 重答 / 换角度 / 继续生成时，沿用这张卡上次搜到的来源，不重复花钱再搜一遍。
-    // 原生模式例外：来源是这一轮流里新搜的，不拼旧搜索块。
-    if (!searchResult && !nativeSearch) {
-      searchResult = (followUp ? followUp.search : card.search) ?? null
-    }
+    const searchEnabled = options?.search === true && question.length > 0
+    const priorSearch = (followUp ? followUp.search : card.search) ?? null
+    // 不联网时沿用上次搜到的来源；联网时由这一轮自己决定（工具循环/原生搜索都不拼旧摘要）
+    let searchResult: CardSearch | null = nativeSearch || searchEnabled ? null : priorSearch
 
     const system = buildSystem(project, card, { followUp })
     const attachments = (followUp ? followUp.attachments : card.attachments) ?? []
@@ -365,21 +382,135 @@ export const useStore = create<Store>((set, get) => {
           }
         }
       } else {
-        for await (const event of streamChat(normalizeApiBase(settings.apiBase), {
-          provider: settings.provider,
-          model: settings.model,
-          reasoningEffort: settings.reasoningEffort,
-          messages: requestMessages,
-          signal,
-        })) {
-          if (event.type === 'text') {
-            answer = event.text
-          } else if (event.type === 'thinking') {
-            thinking = event.text
+        const base = normalizeApiBase(settings.apiBase)
+        const provider = settings.provider ?? 'opencode'
+        // 这家订阅是否还用工具调用：试过一次被上游明确拒绝就记住，之后直接走前置搜索
+        let toolMode = searchEnabled && !readToolLess().includes(provider)
+        const toolSources: SearchSource[] = []
+        const toolQueries: string[] = []
+        const collectSources = (list: SearchSource[]) => {
+          for (const source of list) {
+            if (!toolSources.some((item) => item.url === source.url)) {
+              toolSources.push(source)
+            }
           }
-          if (event.type === 'text' || event.type === 'thinking') {
-            set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+        }
+        /** 跑一轮：这一轮的正文/思考写进 live，返回模型这轮想调的工具 */
+        const runRound = async (
+          roundMessages: ChatMessage[],
+          withTools: boolean,
+        ): Promise<{ text: string; calls: ChatToolCall[] }> => {
+          let roundText = ''
+          let roundThinking = ''
+          let calls: ChatToolCall[] = []
+          for await (const event of streamChat(base, {
+            provider: settings.provider,
+            model: settings.model,
+            reasoningEffort: settings.reasoningEffort,
+            messages: roundMessages,
+            signal,
+            ...(withTools ? { tools: [WEB_SEARCH_TOOL] } : {}),
+          })) {
+            if (event.type === 'text') {
+              roundText = event.text
+            } else if (event.type === 'thinking') {
+              roundThinking = event.text
+            } else if (event.type === 'toolCalls') {
+              calls = event.calls
+            }
+            if (event.type === 'text' || event.type === 'thinking') {
+              answer = roundText
+              thinking = roundThinking
+              set({ live: { cardId, followUpId, answer: finalAnswer(), thinking } })
+            }
           }
+          answer = roundText
+          thinking = roundThinking
+          return { text: roundText, calls }
+        }
+        const roundMessages: ChatMessage[] = [...requestMessages]
+        let rounds = 0
+        try {
+          for (;;) {
+            const round = await runRound(roundMessages, toolMode)
+            if (!toolMode || round.calls.length === 0 || rounds >= MAX_TOOL_ROUNDS) {
+              break
+            }
+            const toolMessages: ChatMessage[] = []
+            for (const call of round.calls.slice(0, 2)) {
+              const query =
+                parseSearchQuery(call.function.arguments) ||
+                buildSearchQuery(project, card, followUp, question)
+              toolQueries.push(query)
+              // 模型自己要搜：先亮「正在搜索「…」」，搜完再让它接着写
+              set({
+                live: {
+                  cardId,
+                  followUpId,
+                  answer: finalAnswer(),
+                  thinking,
+                  searching: true,
+                  searchingQuery: query,
+                },
+              })
+              try {
+                const outcome = await searchWeb(base, query, { oriQuestion: question })
+                collectSources(outcome.sources)
+                toolMessages.push({
+                  role: 'tool',
+                  tool_call_id: call.id,
+                  content: formatToolResult(outcome.query, outcome.sources),
+                })
+              } catch (error) {
+                toolMessages.push({
+                  role: 'tool',
+                  tool_call_id: call.id,
+                  content: `搜索「${query}」失败了：${error instanceof Error ? error.message : '未知错误'}。可以换个搜索词再搜一次，或者直接基于已有信息回答。`,
+                })
+              }
+            }
+            roundMessages.push(
+              { role: 'assistant', content: round.text || null, tool_calls: round.calls },
+              ...toolMessages,
+            )
+            rounds += 1
+            set({ live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
+          }
+        } catch (error) {
+          if (!toolMode || !isToolRejection(error)) {
+            throw error
+          }
+          // 这家订阅不认工具调用：记住它，退回「先搜一次、把结果拼进上下文再问」
+          markToolLess(provider)
+          toolMode = false
+          const fallbackQuery = buildSearchQuery(project, card, followUp, question)
+          set({
+            live: { cardId, followUpId, answer: '', thinking: '', searching: true, searchingQuery: fallbackQuery },
+          })
+          try {
+            const outcome = await searchWeb(base, fallbackQuery, { oriQuestion: question })
+            collectSources(outcome.sources)
+            toolQueries.push(outcome.query)
+            roundMessages.push({
+              role: 'user',
+              content: `${formatToolResult(outcome.query, outcome.sources)}\n\n请基于上面的搜索结果回答最后这个问题。`,
+            })
+          } catch (searchError) {
+            showToast(
+              searchError instanceof ApiError
+                ? `联网搜索失败：${searchError.message}`
+                : '联网搜索失败，这次先按不联网回答',
+            )
+          }
+          await runRound(roundMessages, false)
+        }
+        if (toolSources.length > 0) {
+          searchResult = {
+            query: toolQueries[toolQueries.length - 1] ?? question,
+            sources: toolSources.slice(0, MAX_SEARCH_SOURCES),
+            searchedAt: Date.now(),
+          }
+          commit((current) => model.setSearch(current, cardId, followUpId, searchResult))
         }
       }
     } catch (error) {

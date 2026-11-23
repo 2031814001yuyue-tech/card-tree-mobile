@@ -76,6 +76,10 @@ async function* readSseData(stream: ReadableStream<Uint8Array>): AsyncGenerator<
 
 /** 把统一 ChatMessage 转成 Anthropic 格式：文本直传，图片 dataURL 转 image block */
 const toAnthropicContent = (message: ChatMessage): string | Array<Record<string, unknown>> => {
+  if (message.content === null) {
+    // 只调工具、没有正文的 assistant 消息：Anthropic 侧这边用不到（原生模式不带工具）
+    return ''
+  }
   if (typeof message.content === 'string') {
     return message.content
   }

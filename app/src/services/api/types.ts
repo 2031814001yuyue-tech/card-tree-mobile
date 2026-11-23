@@ -30,7 +30,7 @@ export type ModelInfo = {
   contextWindow: number | null
 }
 
-export type ChatRole = 'system' | 'user' | 'assistant'
+export type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
 /**
  * OpenAI 兼容的多模态内容块。
@@ -40,9 +40,27 @@ export type ChatContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
 
+/** 模型请求调用的一次工具（OpenAI 兼容的 function calling） */
+export type ChatToolCall = {
+  id: string
+  type?: 'function'
+  function: { name: string; arguments: string }
+}
+
+/** 发给模型的工具定义 */
+export type ChatTool = {
+  type: 'function'
+  function: { name: string; description: string; parameters: Record<string, unknown> }
+}
+
 export type ChatMessage = {
   role: ChatRole
-  content: string | ChatContentPart[]
+  /** tool 消息里是工具结果；assistant 只调工具时可以是 null */
+  content: string | ChatContentPart[] | null
+  /** assistant 消息带上「我要调这些工具」 */
+  tool_calls?: ChatToolCall[]
+  /** tool 消息对应哪次调用 */
+  tool_call_id?: string
 }
 
 /** 一次流式调用里冒出来的事件；text/thinking 都是累计值，直接覆盖渲染 */
@@ -50,6 +68,8 @@ export type StreamEvent =
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
   | { type: 'usage'; promptTokens: number | null; completionTokens: number | null }
+  /** 这一轮流结束时模型要求调用工具（已拼好完整参数） */
+  | { type: 'toolCalls'; calls: ChatToolCall[] }
   | { type: 'done'; finishReason: string | null }
 
 export type ChatRequest = {
@@ -61,5 +81,9 @@ export type ChatRequest = {
   reasoningEffort?: string
   temperature?: number
   maxTokens?: number
+  /** 工具定义；不传就是普通补全 */
+  tools?: ChatTool[]
+  /** 默认 auto；「必须调工具」有些实现不支持，别用 */
+  toolChoice?: 'auto' | 'none'
   signal?: AbortSignal
 }

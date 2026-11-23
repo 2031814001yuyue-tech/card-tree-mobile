@@ -6,7 +6,7 @@
  */
 
 import { normalizeApiBase } from './api/chat.js'
-import { ApiError } from './api/types.js'
+import { ApiError, type ChatTool } from './api/types.js'
 import type { SearchSource } from './tree/types.js'
 
 /** 一次搜索等多久（服务端自己还有 20s 超时） */
@@ -168,4 +168,58 @@ export const searchWeb = async (
     query: typeof record.query === 'string' && record.query.trim() ? record.query : question,
     sources,
   }
+}
+
+/**
+ * 交给模型的工具定义：让模型自己决定搜不搜、搜什么（和 DeepSeek 手机端的网页搜索同一种机制）。
+ * 只给一个简单函数，参数只有 query，各家兼容实现的 tool calling 都能认。
+ */
+export const WEB_SEARCH_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description:
+      '联网搜索网页。当问题涉及最新消息、实时数据、你不确定或可能已经变化的事实（新闻、天气、价格、版本、政策、比赛结果、人物近况等），先调用它搜索，再基于结果回答。用一句具体、能直接拿去搜索引擎里查的话作为 query；不要搜「举个例子」「继续」这类需要上下文的碎片。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '完整、可独立检索的搜索词，例如「2026年11月杭州天气」',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+}
+
+/** 从模型给的 tool_call arguments 里取出 query；解析不出来就返回空串 */
+export const parseSearchQuery = (rawArguments: string): string => {
+  try {
+    const parsed: unknown = JSON.parse(rawArguments)
+    if (parsed && typeof parsed === 'object') {
+      const query = (parsed as Record<string, unknown>).query
+      if (typeof query === 'string') {
+        return query.trim().slice(0, 120)
+      }
+    }
+  } catch {
+    // 有的实现给的不是严格 JSON：退化成直接把原文当查询
+    return rawArguments.trim().slice(0, 120)
+  }
+  return ''
+}
+
+/**
+ * 把搜索结果折成一条 tool 消息。带编号，方便模型在回答里用 [1][2] 标来源；
+ * 内容截断，避免把上下文塞爆（每条 snippet ≤220 字）。
+ */
+export const formatToolResult = (query: string, sources: SearchSource[]): string => {
+  const lines = sources.slice(0, 8).map((source, index) => {
+    const snippet = (source.summary || source.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 220)
+    const date = source.publishedAt ? ` · ${source.publishedAt.slice(0, 10)}` : ''
+    return `[${index + 1}] ${source.title || '无标题'}${date}\n${source.url}${snippet ? `\n${snippet}` : ''}`
+  })
+  return `搜索「${query}」，共 ${lines.length} 条结果：\n\n${lines.join('\n\n')}`
 }

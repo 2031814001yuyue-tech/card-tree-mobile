@@ -9,4 +9,6 @@ export type LiveText = {
   thinking: string
   /** 联网搜索正在进行（UI 显示「正在搜索…」；搜完开始流式时自动消失） */
   searching?: boolean
+  /** 正在搜的那句话（工具循环里模型自己给的搜索词），UI 显示「正在搜索「…」」 */
+  searchingQuery?: string
 }

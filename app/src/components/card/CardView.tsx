@@ -310,7 +310,7 @@ export const CardView = ({
           ) : mainLive?.searching ? (
             <p className={styles.searching}>
               <IconSearchOutline16 />
-              正在搜索…
+              {mainLive.searchingQuery ? `正在搜索「${mainLive.searchingQuery}」…` : '正在搜索…'}
             </p>
           ) : status === 'running' ? (
             <div className={styles.typing} aria-label="正在生成">
@@ -408,7 +408,7 @@ export const CardView = ({
                   ) : followLive?.searching ? (
                     <p className={styles.searching}>
                       <IconSearchOutline16 />
-                      正在搜索…
+                      {followLive.searchingQuery ? `正在搜索「${followLive.searchingQuery}」…` : '正在搜索…'}
                     </p>
                   ) : followUp.status === 'running' ? (
                     <div className={styles.typing}>

@@ -33,7 +33,7 @@ MainActivity.onCreate()
         ├─ GET /api/models           → 按 x-card-tree-provider 路由四家上游，每家 5 分钟缓存
         ├─ POST /api/chat/completions→ 按头路由四家并逐块透传 SSE
         │                               （一律注入 Authorization；opencode 另补 x-opencode-session / UA）
-        ├─ POST /api/deepseek/search → 反代 DeepSeek Search API（前置模式；没有搜索 Key 时返回 409）
+        ├─ POST /api/deepseek/search → 反代 DeepSeek Search API（工具循环 / 前置模式共用；没有搜索 Key 时返回 409）
         └─ POST /api/deepseek/messages→ 反代 DeepSeek Anthropic 端点（0.3.9 原生联网搜索：
                                         x-api-key + anthropic-version，SSE 逐块透传；没有 Key 时 409）
 
@@ -61,7 +61,7 @@ MainActivity.onCreate()
 
 ### 联网搜索在 APK 里怎么走
 
-搜索有**两种模式**（0.3.9 起），由当前订阅决定：
+搜索分**三种情况**（0.3.9 原生模式 / 0.3.14 工具循环 / 前置模式兜底），由当前订阅和模型能力决定：
 
 **前置模式（opencode go / 智谱 / Kimi 订阅）**——DeepSeek 官方 Search API：
 
@@ -88,11 +88,13 @@ MainActivity.onCreate()
 ```
 
 - 原生模式下**模型自主**决定搜不搜、搜什么、搜几轮（上限 `max_uses:5`）；网页侧 `onSearching` 显示「正在搜索…」、`onSources` 收集 `web_search_result`（title/url）写进 `followUp.search` / `card.search`；回答天然带 `[1][2]` 引用
-- `store.ts` 的 `run()`：`provider==='deepseek'` 且开了联网 → 走 `streamNativeSearchChat`（跳过前置搜索、不拼 searchBlock）；其它订阅照旧前置模式。重答 / 换角度沿用卡片旧来源（原生模式重答走普通流式 + 旧来源，不再花钱搜索）
+- **工具循环（0.3.14 起，其它订阅的默认方式）**：网页侧请求带上 `tools:[web_search]`（OpenAI 兼容的 function calling），模型先返回 `tool_calls`（里面是它自己写的搜索词）→ 网页侧调 `/api/deepseek/search` 搜 → 把结果作为 `role:'tool'` 消息塞回去让它继续写，**最多两轮、每轮最多 2 次搜索**。APK 侧不需要新路由：`/api/deepseek/search` 本来就是原样转发，拿到的 `{results}`/`{sources}` 前端都认。搜索中卡片显示「正在搜索「模型给的词」…」（`live.searchingQuery`）
+- 有些订阅/模型不认工具调用：第一次被上游 400/422 且错误里提到 tool/function 时，前端把这个订阅记进 localStorage `card-tree:tool-less`，之后该订阅自动退回**前置模式**（多花一次被拒的请求，不影响使用）
+- `store.ts` 的 `run()`：`provider==='deepseek'` 且开了联网 → 走 `streamNativeSearchChat`（跳过前置搜索、不拼 searchBlock）；其它订阅先试工具循环、不支持再退回前置搜索。重答 / 换角度沿用卡片旧来源（原生模式重答走普通流式 + 旧来源，不再花钱搜索）
 - 搜索 Key 是**独立一把**：`KeyVault(this, "deepseek_api_key", "card_tree_deepseek_key_v1")`——它同时是「DeepSeek 官方」订阅的对话 Key（同 field / alias，「设置 → 联网搜索」与「设置 → 连接（DeepSeek 官方时）」看到的就是同一把）；其它订阅的对话 Key 各用各的 field，互不影响
 - 前置模式下网页侧**两种返回结构都认**：中继版返回 `{sources:[…]}`，APK 直连 DeepSeek 返回 `{results:[…]}`（`services/search.ts` 里优先读 `sources`，没有就读 `results`，`publishedAt` 兼容 `date`）
-- 搜到的摘要（前置模式）会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息；两种模式的来源都随卡片存 IndexedDB，离线回看时来源列表还在
-- 前置模式搜索失败 / 没配 Key 都不会阻塞提问：前端 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
+- 搜到的摘要（前置模式）会被 `context.ts` 的 `searchBlock()` 拼成编号清单放进这一问的用户消息；工具循环则把每条结果作为 `tool` 消息（`search.ts` 的 `formatToolResult()` 带编号 + 截断摘要）；两种模式与原生模式的来源都随卡片存 IndexedDB，离线回看时来源列表还在
+- 搜索失败 / 没配 Key 都不会阻塞提问：工具循环把失败告诉模型让它换词或直接答，前置模式 toast 一句后照常发；APK 里没配 Key 时输入框上方的开关显示「联网（未开通）」
 
 ### 多订阅（四家上游）在 APK 里怎么走
 
@@ -189,7 +191,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
 `android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.6'` 的兜底值（有两处，含 WebUpdate 组件里那处）、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
-**纯网页层的改动不需要动 APK**：壳没变时只改 `app/package.json` 的 `version` 和 SettingsSheet 两处兜底（如 0.3.7 的卡片合并、0.3.10 的滑动动画、0.3.11 的流式快照、0.3.13 的字号/手势/搜索词），发一个 `web-v<x.y.z>` 的 Release 即可，装了旧 APK 的用户「检查更新」就能拿到；`versionCode` / `APP_VERSION` 保持不变，`aapt2` 验证结果也不变。
+**纯网页层的改动不需要动 APK**：壳没变时只改 `app/package.json` 的 `version` 和 SettingsSheet 两处兜底（如 0.3.7 的卡片合并、0.3.10 的滑动动画、0.3.11 的流式快照、0.3.13 的字号/手势/搜索词、0.3.14 的工具循环搜索），发一个 `web-v<x.y.z>` 的 Release 即可，装了旧 APK 的用户「检查更新」就能拿到；`versionCode` / `APP_VERSION` 保持不变，`aapt2` 验证结果也不变。
 
 ## 已做的验证
 
@@ -201,6 +203,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | `LocalServer` 桌面 JVM 冒烟 | 用 JDK 17 把 `LocalServer` + `AssetSource` + `Mime` 编译成纯 JVM 程序，读真实 `app/dist` 与真实 Key：静态首页 1330 B、manifest、SPA 回退、未知静态 404、`/api/health` JSON（含 `"search":true`）、`/api/models` 42151 B（32 个模型）、`/api/chat/completions` 真实 SSE —— **29 个 chunk、首块 1ms、27 条 `data:` 事件、200 text/event-stream**、`/api/deepseek/search` 真实搜索 —— **200、771ms，返回 中国天气网 / 钱江晚报 两条结果** |
 | 网页侧 | `pnpm type` 0 error、`pnpm lint` 0 warning 0 error、`pnpm build` 通过 |
 | 联网搜索端到端 | 390×844 视口点亮「联网搜索」提问「杭州今天天气怎么样？」：真实搜到 5 条来源、回答带 `[1]–[5]`、卡片底部来源列表可点；思考过程里能看到 5 条资料摘要（见 `docs/preview/25-search-toggle.png`、`26-search-sources.png`） |
+| 工具循环搜索（0.3.14） | CDP 390×844 + opencode go / deepseek-v4.1-flash：开联网追问「今天杭州天气怎么样？顺便说说 2026 年 11 月最新的 AI 新闻」→ 请求体带 	ools:1（5 条消息）→ 模型返回 2 个 tool_call → App 真实搜了 2 次（杭州今天天气 实时天气预报、2026年11月 AI 最新新闻）→ 第二轮带 8 条消息（assistant + 2 条 tool 结果）→ 924 字回答 → 落库 ollowUp.search.query 与 10 条去重来源（见 docs/preview/44-tool-search.png） |
 | 原生 UI 路径 | 用 CDP 注入一个假的 `window.CardTreeNative`，在 390×844 视口截了「首次启动填 Key」和「设置 → 连接」两张图（见 `docs/preview/14-onboarding.png`、`15-settings-connect.png`） |
 | **WebUpdater 全链路** | **真实 GitHub API**：同版本（0.3.4）check → `null`（无更新）；低版本（0.0.1）check → 正确拿到 `web-v0.3.4`（tag/size/notes 齐全）。**本地服务器扮演 GitHub 完整安装**：check → 下载 → sha256 校验 → 解压 156 个文件（`index.html` 1450 B、`static/css/main.*.css` 73530 B 都能从 `files/web/` 读出）→ 原子切换 → `currentWebVersion()` 读回 `9.9.9`；`../` 目录穿越被拒绝；**sha256 不一致**时抛「更新包校验失败（sha256 不一致），已取消」且 `files/web` 不被创建、版本仍是壳版本 |
 | 发布脚本 | `node scripts/publish-web.mjs` 发布 `web-v0.3.5`（web.zip 1.78 MB、156 个条目、正斜杠路径），`jar tf` 验证 zip 结构正确；gh 前置检查（auth / tag 不存在）都过 |

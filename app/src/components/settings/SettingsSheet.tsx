@@ -208,7 +208,7 @@ const WebUpdate = () => {
       <div className={styles.backupInfo}>
         <span className={styles.label}>网页层版本</span>
         <span className={styles.count}>
-          {webVersion ?? nativeVersion() ?? '0.3.13'}
+          {webVersion ?? nativeVersion() ?? '0.3.14'}
           {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
         </span>
       </div>
@@ -303,7 +303,7 @@ export const SettingsSheet = ({
     }
   }, [open, provider, providersReady])
 
-  const version = nativeVersion() ?? '0.3.13'
+  const version = nativeVersion() ?? '0.3.14'
 
   // 模型列表还没回来时，也把当前模型显示出来；hint 标注能力（能看图 / 上下文）
   const options: ModelInfo[] = models.some((item) => item.id === settings.model)
