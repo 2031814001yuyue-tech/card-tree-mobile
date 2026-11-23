@@ -381,9 +381,8 @@ export const App = () => {
         return
       }
       if (view === 'card') {
-        // 卡片 → 全览：内容层弹回，全览浮层自己淡入
+        // 卡片视图左滑不做任何事（用户反馈：这里滑出全览容易误触，去掉）
         resetPane(true)
-        setOverviewOpen(true)
       } else if (lastCardIdRef.current) {
         // 树 → 卡片（最近看过的）：新视图（卡）从右滑入
         resetPane(false)

@@ -84,13 +84,15 @@ export const fetchSearchAvailability = async (apiBase: string): Promise<boolean>
 export const searchWeb = async (
   apiBase: string,
   query: string,
-  options?: { count?: number },
+  options?: { count?: number; oriQuestion?: string },
 ): Promise<SearchOutcome> => {
   const base = normalizeApiBase(apiBase)
   const question = query.trim()
   if (!question) {
     throw new ApiError('protocol', '搜索词不能为空')
   }
+  // ori_question 只放用户的原话（≤128 字），query 才是真正拿去搜的、可能带上下文的词
+  const origin = (options?.oriQuestion ?? query).trim().slice(0, 128)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
   let response: Response
@@ -102,8 +104,8 @@ export const searchWeb = async (
         query: question,
         count: options?.count ?? DEFAULT_COUNT,
         // 中继读 oriQuestion，DeepSeek 原生接口读 ori_question：两个都发，谁认哪个都行
-        oriQuestion: question.slice(0, 128),
-        ori_question: question.slice(0, 128),
+        oriQuestion: origin,
+        ori_question: origin,
         need_content: false,
       }),
       signal: controller.signal,

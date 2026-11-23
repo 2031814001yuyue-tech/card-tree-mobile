@@ -54,6 +54,7 @@ const applyTheme = (theme: Theme) => {
 
 let appliedTheme: Theme | null = null
 let appliedStyle: string | null = null
+let appliedFontScale: number | null = null
 
 const syncTheme = () => {
   const theme = resolveTheme(useSettings.getState().themePreference, getOsTheme())
@@ -68,6 +69,12 @@ const syncTheme = () => {
     document.body.dataset.style = style
     // 纸面颜色变了，浏览器栏 / Android 状态栏也要跟着换
     syncPageBackground()
+  }
+  // 正文字号：写进 CSS 变量，卡片 / 树 / 输入框的字体都按它缩放
+  const fontScale = useSettings.getState().fontScale
+  if (fontScale !== appliedFontScale) {
+    appliedFontScale = fontScale
+    document.documentElement.style.setProperty('--ct-font-scale', String(fontScale))
   }
 }
 

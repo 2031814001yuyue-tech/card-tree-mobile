@@ -15,6 +15,9 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 /** 界面风格：只是换一套 --ct-* 颜色 token，不动组件结构 */
 export type StyleTheme = 'index' | 'plain' | 'parchment' | 'graphite'
 
+/** 正文字号档位（1 = 标准）；只缩放卡片正文 / 问题 / 树上的文字，不缩 UI 控件 */
+export const FONT_SCALES = [0.9, 1, 1.1, 1.25] as const
+
 export type Settings = {
   /** 模型接口地址：默认同源 /api；开发时可填 http://127.0.0.1:8787/api */
   apiBase: string
@@ -27,6 +30,8 @@ export type Settings = {
   themePreference: ThemePreference
   /** 界面风格（索引卡 / 素笺 / 羊皮纸 / 石墨） */
   styleTheme: StyleTheme
+  /** 正文字号倍数（0.9 / 1 / 1.1 / 1.25），写进 CSS 变量 --ct-font-scale */
+  fontScale: number
   locale: Locale
 }
 
@@ -49,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reasoningEffort: DEFAULT_EFFORT,
   themePreference: 'system',
   styleTheme: 'index',
+  fontScale: 1,
   locale: 'zh-CN',
 }
 
@@ -60,6 +66,10 @@ const isThemePreference = (value: unknown): value is ThemePreference =>
 
 export const isStyleTheme = (value: unknown): value is StyleTheme =>
   value === 'index' || value === 'plain' || value === 'parchment' || value === 'graphite'
+
+/** 只接受预设档位，避免手改 localStorage 把布局撑坏 */
+export const isFontScale = (value: unknown): value is number =>
+  typeof value === 'number' && (FONT_SCALES as readonly number[]).includes(value)
 
 /** 读设置并逐项校正：存档损坏、字段缺失都回落到默认值，不让界面崩 */
 const readSettings = (): Settings => {
@@ -91,6 +101,7 @@ const readSettings = (): Settings => {
         ? saved.themePreference
         : base.themePreference,
       styleTheme: isStyleTheme(saved.styleTheme) ? saved.styleTheme : base.styleTheme,
+      fontScale: isFontScale(saved.fontScale) ? saved.fontScale : base.fontScale,
       locale: saved.locale === 'en-US' || saved.locale === 'zh-CN' ? saved.locale : base.locale,
     }
   } catch {
@@ -165,4 +176,6 @@ export const setReasoningEffort = (reasoningEffort: string) => updateSettings({ 
 export const setThemePreference = (themePreference: ThemePreference) =>
   updateSettings({ themePreference })
 export const setStyleTheme = (styleTheme: StyleTheme) => updateSettings({ styleTheme })
+export const setFontScale = (fontScale: number) =>
+  updateSettings({ fontScale: isFontScale(fontScale) ? fontScale : 1 })
 export const setLocale = (locale: Locale) => updateSettings({ locale })

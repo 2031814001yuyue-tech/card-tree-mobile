@@ -31,6 +31,8 @@
   --ct-danger: #cf4459;
   /* 排版 */
   --ct-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
+  /* 正文字号倍数：设置页「字号」改的就是它（0.9 / 1 / 1.1 / 1.25） */
+  --ct-font-scale: 1;
   --ct-radius-card: 18px;
   /* 动效：只用一个缓出曲线，克制 */
   --ct-ease: cubic-bezier(0.2, 0.8, 0.2, 1);

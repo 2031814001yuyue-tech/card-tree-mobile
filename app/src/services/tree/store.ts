@@ -20,6 +20,7 @@ import { useSettings } from '../settings.js'
 import {
   FALLBACK_CONTEXT_WINDOW,
   buildMessages,
+  buildSearchQuery,
   buildSystem,
   contextBudget,
   estimateAttachmentTokens,
@@ -239,10 +240,15 @@ export const useStore = create<Store>((set, get) => {
     let searchResult: CardSearch | null = null
     if (options?.search && question && !nativeSearch) {
       controller = null
+      // 搜索词带上上下文：光拿「举个例子」去搜会完全跑偏（DeepSeek 手机端是模型自己决定搜什么，
+      // 前置模式没有这个能力，只能先把问题补全成一句搜索引擎能懂的话）
+      const searchQuery = buildSearchQuery(project, card, followUp, question)
       // searching:true 让卡片先显示「正在搜索…」，来源落卡后开始流式时自然消失
       set({ running: { cardId, followUpId }, live: { cardId, followUpId, answer: '', thinking: '', searching: true } })
       try {
-        const outcome = await searchWeb(normalizeApiBase(settings.apiBase), question)
+        const outcome = await searchWeb(normalizeApiBase(settings.apiBase), searchQuery, {
+          oriQuestion: question,
+        })
         searchResult = { query: outcome.query, sources: outcome.sources, searchedAt: Date.now() }
         commit((current) => model.setSearch(current, cardId, followUpId, searchResult))
       } catch (error) {

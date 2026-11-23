@@ -189,7 +189,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 改四处（**一条命令改一个文件**，别批量替换；批量替换曾把整份文件里的字符替换错）：
 `android/app/build.gradle` 的 `versionCode` / `versionName`、`MainActivity.java` 的 `APP_VERSION`（网页「关于」里显示的那个）、`app/src/components/settings/SettingsSheet.tsx` 里 `nativeVersion() ?? '0.3.6'` 的兜底值（有两处，含 WebUpdate 组件里那处）、`app/package.json` 的 `version`。改完 `node -e "require('./package.json')"` + `pnpm type` 过一遍。**一次只改一条**（PowerShell 批量替换曾把整份文件改坏过）。
 
-**纯网页层的改动不需要动 APK**：壳没变时只改 `app/package.json` 的 `version` 和 SettingsSheet 两处兜底（如 0.3.7 的卡片合并），发一个 `web-v<x.y.z>` 的 Release 即可，装了旧 APK 的用户「检查更新」就能拿到；`versionCode` / `APP_VERSION` 保持不变，`aapt2` 验证结果也不变。
+**纯网页层的改动不需要动 APK**：壳没变时只改 `app/package.json` 的 `version` 和 SettingsSheet 两处兜底（如 0.3.7 的卡片合并、0.3.10 的滑动动画、0.3.11 的流式快照、0.3.13 的字号/手势/搜索词），发一个 `web-v<x.y.z>` 的 Release 即可，装了旧 APK 的用户「检查更新」就能拿到；`versionCode` / `APP_VERSION` 保持不变，`aapt2` 验证结果也不变。
 
 ## 已做的验证
 
@@ -211,6 +211,7 @@ C:\Users\Lenovo\Android\gradle-8.7\bin\gradle.bat assembleDebug
 | **流式跟随 / 浮动按钮 / 左右滑（0.3.8，纯网页层）** | CDP 全验：滚动后跳底钮出现、两态切换（跳底 atBottomGap:0 / 跳顶 top:0）、树右滑开抽屉、抽屉右滑关、卡右滑回树、树左滑回最近卡、卡左滑开全览、按住期间流式不拉走滚动位置；追问区的「正在搜索…」350ms 可见、搜索结束消失。**顺带修真 bug**：0.3.5 起的跟随拉回底部（scroll/resize 监听挂在 `ready=false` 时刻从未生效——`mainRef.current=null` 时挂了个空；0.3.8 改为 `ready` 后挂并加 `userTouchRef` 按住即停）。**测试坑**：CDP touch 起点 x<80 会触发 Chrome 历史导航手势把页面导走，起点要 ≥100 |
 | **原生联网搜索（0.3.9，壳改动）** | 三层验证：①中继真实冒烟（`POST /api/deepseek/messages` → 200 SSE，`server_tool_use` 1 次、`web_search_tool_result` 10 条来源、`text_delta` 55 段、首字 1635ms、总 2062ms）；②APK JVM harness（`handleAnthropic` 直连上游：200、2 轮搜索、10 条来源、48 段正文流式、`System.exit(0)` 干净退出）；③CDP e2e（localStorage 切 provider=deepseek → 开联网 pill → 发追问 → 900ms 显示「正在搜索…」→ 16s 完成，`followUp.search` 落库 5 条来源、回答带 `[1][2][3][4]` 引用、UI「联网搜索 · 5 条来源」）。**顺带改进**：上下文预算改按 `/models` 真实窗口算（deepseek-flash 1M → 预算约 55 万 token，此前写死 32K） |
 | **回答完成通知（0.3.12，壳改动）** | 桌面 JVM harness 三断言（慢速分块假上游经 `providerBase` 测试缝注入）：①正常读完 → 回调触发一次、带 provider id（`NORMAL_DONE=true EVENTS=[opencode]`）；②流式中途 `disconnect()`（= 点停止语义）→ **不触发**（`STOP_NO_NOTIFY=true TOTAL=1`，假上游须分块慢发——一次性发完时断开前转发已完成，属合理竞态）；③`setChatDoneListener(null)` → 不炸（`NULL_LISTENER_OK=true`）。MainActivity 通知构造 / `POST_NOTIFICATIONS` 权限请求（SDK>=33，requestCode 1002）/ `resumed` 守卫过了 gradle 编译与 `aapt2` 权限校验；通知实际弹出效果待真机走查 |
+| **字号可调 / 左滑误触 / 搜索词带上下文（0.3.13，纯网页层）** | CDP 验过三件事：①把根变量 `--ct-font-scale` 从 1 调到 1.25，输入框字号 15.5px → 19.375px、树卡片提示 16.5px → 20.625px；把 `fontScale: 1.25` 写进 localStorage 后刷新，变量仍是 1.25（设置 → 外观 → 字号真的落到渲染）。②卡片视图左滑之后没有浮现全览（`[role=dialog]` 不存在、「拖卡片改上级」提示不在），全览仍可从顶栏「全览」进。③点亮联网搜索后发追问「举个例子」，拦到的请求体是 `query = 原卡片问题 + 举个例子`、`ori_question = 举个例子`，卡片底部来源列表照常渲染（1 条假来源） |
 
 **没做到的**：真机 / 模拟器安装运行。这台开发机没有硬件虚拟化（`VirtualizationFirmwareEnabled: False`），开不了 Android 模拟器；`adb` 已随 platform-tools 装好，有真机插上可以直接 `adb install`。
 

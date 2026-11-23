@@ -230,6 +230,48 @@ export const resolvedRefs = (project: Project, card: Card): Card[] => {
   return refs
 }
 
+// 「离开上下文就说不清」的问法：短问、指代、承接词。
+// 这类问题直接拿去搜索引擎会搜出莫名其妙的泛结果（比如搜「举个例子」），
+// 所以前置模式搜索时要把父级问题带上，先给搜索引擎一点语境。
+const CONTEXT_DEPENDENT =
+  /^(那|这|它|他|她|其|此|再|还|继续|然后|另外|顺便|举例|例如|比如|为什么|怎么|如何|能不能|可以吗|是不是|有没有|详细|展开|具体点|换个角度|重新|接上)|上面|刚才|前面|之前|这张|刚才那个/
+
+/**
+ * 拼出一个「带上下文的搜索词」：当前问法 + （追问时）本卡问题 + 最近两级祖先问题。
+ * 只有问法本身短、或明显依赖上文时才把上下文拼进去，避免长问句被稀释。
+ */
+export const buildSearchQuery = (
+  project: Project,
+  card: Card,
+  followUp?: FollowUp | null,
+  question?: string,
+): string => {
+  const current = String(question ?? (followUp ? followUp.prompt : card.prompt) ?? '').trim()
+  if (!current) {
+    return ''
+  }
+  const needContext = current.length <= 14 || CONTEXT_DEPENDENT.test(current)
+  if (!needContext) {
+    return current
+  }
+  const parts: string[] = []
+  if (followUp && card.prompt.trim() && card.prompt.trim() !== current) {
+    parts.push(card.prompt.trim())
+  }
+  for (const ancestor of ancestorChain(project, card).slice(-2)) {
+    const prompt = ancestor.prompt.trim()
+    if (prompt && prompt !== current) {
+      parts.push(prompt)
+    }
+  }
+  if (parts.length === 0) {
+    return current
+  }
+  const clipped = parts.map((part) => (part.length > 60 ? `${part.slice(0, 60)}…` : part))
+  const query = `${clipped.join(' ')} ${current}`
+  return query.length > 200 ? query.slice(0, 200) : query
+}
+
 /**
  * 预算分配：先给引用卡片（最多 25%），再按「从老到新」的顺序折叠 / 丢弃祖先，
  * 直到塞进 budget 为止。stats.approxTokens 会再加上本卡 prompt/answer 与 system。

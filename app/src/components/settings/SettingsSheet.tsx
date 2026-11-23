@@ -27,7 +27,9 @@ import {
   updateState,
 } from '../../services/update.js'
 import {
+  FONT_SCALES,
   setApiBase,
+  setFontScale,
   setModel,
   setProvider,
   setReasoningEffort,
@@ -67,6 +69,13 @@ const STYLE_THEMES: { value: StyleTheme; label: string }[] = [
   { value: 'parchment', label: '羊皮纸' },
   { value: 'graphite', label: '石墨' },
 ]
+
+const FONT_LABEL: Record<number, string> = {
+  0.9: '小',
+  1: '标准',
+  1.1: '大',
+  1.25: '特大',
+}
 
 const Pill = ({
   active,
@@ -199,7 +208,7 @@ const WebUpdate = () => {
       <div className={styles.backupInfo}>
         <span className={styles.label}>网页层版本</span>
         <span className={styles.count}>
-          {webVersion ?? nativeVersion() ?? '0.3.12'}
+          {webVersion ?? nativeVersion() ?? '0.3.13'}
           {state.state === 'available' && state.version ? ` → ${state.version}` : ''}
         </span>
       </div>
@@ -294,7 +303,7 @@ export const SettingsSheet = ({
     }
   }, [open, provider, providersReady])
 
-  const version = nativeVersion() ?? '0.3.12'
+  const version = nativeVersion() ?? '0.3.13'
 
   // 模型列表还没回来时，也把当前模型显示出来；hint 标注能力（能看图 / 上下文）
   const options: ModelInfo[] = models.some((item) => item.id === settings.model)
@@ -574,7 +583,21 @@ export const SettingsSheet = ({
             ))}
           </div>
         </div>
-        <p className={styles.hint}>风格只换纸面和墨色，主题管深浅；两者可以任意组合。</p>
+        <div className={styles.row}>
+          <span className={styles.label}>字号</span>
+          <div className={styles.pills}>
+            {FONT_SCALES.map((scale) => (
+              <Pill
+                key={scale}
+                active={settings.fontScale === scale}
+                onClick={() => setFontScale(scale)}
+              >
+                {FONT_LABEL[scale] ?? String(scale)}
+              </Pill>
+            ))}
+          </div>
+        </div>
+        <p className={styles.hint}>风格只换纸面和墨色，主题管深浅；字号只缩放卡片正文、树上的文字和输入框，不影响按钮大小。三者可以任意组合。</p>
       </section>
 
       <section className={styles.section}>

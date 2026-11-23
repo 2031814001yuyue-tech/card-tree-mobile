@@ -95,7 +95,7 @@
 .question {
   margin: 0;
   color: var(--ct-ink);
-  font-size: 19px;
+  font-size: calc(19px * var(--ct-font-scale, 1));
   font-weight: 600;
   line-height: 1.5;
   letter-spacing: -0.012em;
@@ -133,7 +133,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  font-size: 15px;
+  font-size: calc(15px * var(--ct-font-scale, 1));
   line-height: 1.78;
 }
 

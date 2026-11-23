@@ -216,7 +216,7 @@
 
 .ds-markdown {
   table code {
-    font-size: 13px;
+    font-size: calc(13px * var(--ct-font-scale, 1));
   }
 }
 
